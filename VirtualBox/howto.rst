@@ -14,6 +14,8 @@ Install Frontend
 
 #. Create `vb-in.xml` file with your desired settings
 
+   There is vb-in.template file that is provided for building a frontend and 2 compute nodes.
+
 #. Run script to create VM settings in VirtualBox::
 
       ./vb_cluster --type=frontend vb-in.xml 
