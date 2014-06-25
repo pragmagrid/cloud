@@ -31,7 +31,28 @@ Install Frontend
          gateway = 10.0.3.2  
          DNS server = 10.0.3.3  
          FQDN = fe.public (or any other name)
-       
+ 
+Install compute nodes
+----------------------
+
+#. use the same vb-in.xml file that was created for installing frontend, it has a separate section
+   for compute nodes.
+   
+#. Run script to create VM settings in VirtualBox::
+
+      ./vb_cluster --type=compute vb-in.xml 
+      
+#. On the frontend VM ::
+
+     insert-ethers
+   
+   Start first compute node VM either from VBox Manager gui or ::  
+
+      vboxmanager startvm <VMName>
+
+   Quit insert-ethers once all compute nodes that need to be installed are "discovered"
+   
+   
 How to Install Guest Additions
 ----------------------------------
 
