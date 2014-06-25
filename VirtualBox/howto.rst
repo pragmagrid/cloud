@@ -7,7 +7,31 @@ Rocks Cluster in VirtualBox
 
 + Download VBox Guest Additions ISO (ex. VBoxGuestAdditions_4.3.10.iso)
 
+Install Frontend
+------------------
 
+#. Download Rocks boot ISO form rocks web site
+
+#. Create `vb-in.xml` file with your desired settings
+
+#. Run script to create VM settings in VirtualBox::
+
+      ./vb_cluster --type=frontend vb-in.xml 
+      
+#. Start VM either from a VBox Manager GUI console or::
+
+      vboxmanager startvm <VMName>
+    
+#. When you see Rocks install screen proceed with normal rocks frontend install
+   For public IP use your VBox next available IP. With the default VBox install
+   these are the network settings to use (assume frontend is the  first VM that uses the first
+   available IP)::
+   
+         IP = 10.0.3.15  
+         gateway = 10.0.3.2  
+         DNS server = 10.0.3.3  
+         FQDN = fe.public (or any other name)
+       
 How to Install Guest Additions
 ----------------------------------
 
