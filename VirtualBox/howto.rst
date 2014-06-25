@@ -35,6 +35,9 @@ Install Frontend
 How to Install Guest Additions
 ----------------------------------
 
+Guest Additiosn allow to mount directories from the host computer to the guest VM and transfer files
+between the two. If you don't need mounting from the host skip this section.
+
 #. Mount Guest Additions ISO to your VM
 
    + In VirtualBox Manager Start VM for which you want to install extensions `fe611` 
