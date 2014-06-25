@@ -1,0 +1,4 @@
+cloud
+=====
+
+enabling different virtualizations
