@@ -1,0 +1,26 @@
+<vbc version="0.1">
+    <vm name="fe611" private="local-fe611">
+	    <iso os="Linux_64" path="/Users/nadya/Desktop/vbox/ISO/linux-6.1.1.iso"/>
+	    <shared name="data1" path="/Users/Shared/data1"/>
+	    <shared name="data2" path="/tmp/data2"/>
+	    <enable cpuhotplug="on" />
+    </vm>
+    <frontend cpus="2">
+        <memory base="2000" vram="32" />
+	    <boot order="dvd disk none none" />
+	    <private nic="intnet" nictype="82540EM" nicname="default"/>
+	    <public nic="nat" nictype="82540EM" />
+	    <hd  size="50000" variant="Standard"/>
+	    <syssetting mouse="usbtablet" audio="none"/>
+	    <storage name="SATA" type="sata" controller="IntelAhci" attr="hdd" port="0" device="0"/>
+	    <storage name="IDE" type="ide" controller="PIIX4" attr="dvddrive" port="0" device="0"/>
+    </frontend>
+    <compute cpus="1" count="2">
+        <memory base="1000" vram="32" />
+	    <boot order="net disk none none" />
+	    <private nic="intnet" nictype="82540EM" nicname="default"/>
+	    <hd  size="50000" variant="Standard"/>
+	    <syssetting audio="none"/>
+	    <storage name="SATA" type="sata" controller="IntelAhci" attr="hdd" port="0" device="0"/>
+     </compute>
+</vbc>

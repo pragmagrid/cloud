@@ -1,0 +1,321 @@
+#!/usr/bin/env python
+
+import os
+import sys
+import string
+import logging
+from optparse import OptionParser, OptionGroup
+import subprocess
+import xml.etree.ElementTree
+from pprint import pprint
+
+class VBwrapper:
+	"""Base class for VirtualBox VMs creation"""
+	def __init__(self, argv):
+		self.args = argv[1:]
+		self.logfile = os.path.basename(argv[0]) + ".log"
+		self.version = "Version 0.1"
+		self.parseArgs()
+		self.checkCommand()
+		self.initLogging()
+
+	def parseArgs(self):
+		"""parse command line arguments """
+		self.errors = { "errType":"need to provide type (frontend or compute)",
+						"errNoConfig":"need to provide xml configuration file.",
+						"errConfig":"Configuration file %s is not found"}
+		usage = "Usage: %prog --type=[frontend|compute] configFile"
+		self.parser = OptionParser(usage, version=self.version)
+		self.parser.add_option("--type", dest="type", default=False, help="VM type is frontend or compute")
+
+		(options, args) = self.parser.parse_args(self.args)
+		if options.type not in ["frontend", "compute"]: 
+			self.parser.error(self.errors["errType"])
+		else:
+			self.type = options.type
+
+		if args:
+			self.config = args[0]
+		else:
+			self.parser.error(self.errors["errNoConfig"])
+
+
+	def checkCommand(self):
+		cmd = "which vboxmanage"
+		try:  
+			out = subprocess.check_output(cmd, shell=True)
+		except: 
+			err = "Command %s not found.\nCheck VirtualBox installation and make sure directory with %s is in your $PATH" 
+			sys.exit(err % (cmd, cmd)) 
+		self.cmd = out[:-1]
+
+	def initLogging(self):
+		""" create logger. logging levels: debug,info,warn,error,critical """
+		self.logger = logging.getLogger("%prog")
+		self.logger.setLevel(logging.DEBUG)
+
+		# file handler
+		fh = logging.FileHandler(self.logfile)
+		fh.setLevel(logging.DEBUG)
+
+		# console handler 
+		ch = logging.StreamHandler()
+		ch.setLevel(logging.DEBUG)
+
+		# formatter Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+		formatter = logging.Formatter('%(asctime)s %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M')
+		ch.setFormatter(formatter)
+		fh.setFormatter(formatter)
+
+		# add handlers to logger
+		self.logger.addHandler(ch)
+		self.logger.addHandler(fh)
+
+
+	def parseConfig(self):
+		if not os.path.isfile(self.config): 
+			self.parser.error(self.errors["errConfig"] % self.config)
+
+		xmlroot = xml.etree.ElementTree.parse(self.config).getroot()
+		version = xmlroot.attrib["version"]
+
+		# get generic info
+		self.parseVmTag(xmlroot)
+		if self.type == "frontend":
+			# get frontend info
+			self.parseFrontendTag(xmlroot)
+		else:
+			# get compute info
+			self.parseComputeTag(xmlroot)
+
+
+	def parseVmTag(self, xmlroot):
+		"""parse <vm> tag info"""
+
+		self.VM = {}
+		# VM and network names
+		xmlnode = xmlroot.findall("./vm")[0]
+		self.VM["vm_name"]= xmlnode.attrib["name"]
+		self.VM["vm_network"] = local = xmlnode.attrib["private"]
+
+		# iso info
+		xmlnode = xmlroot.findall("./vm/iso")[0]
+		self.VM["iso_os"] = xmlnode.attrib["os"]
+		self.VM["iso_path"] = xmlnode.attrib["path"]
+
+		# shared folders info
+		xmlnodes = xmlroot.findall("./vm/shared")
+		self.VM["shared"] = []
+		for node in xmlnodes:
+			shared = {}
+			shared["shared_name"] = node.attrib["name"]
+			shared["shared_path"] = node.attrib["path"]
+			self.VM["shared"].append(shared)
+
+		# hotplug cpu info
+		xmlnode = xmlroot.findall("./vm/enable")[0]
+		if "cpuhotplug" in xmlnode.attrib:
+			self.VM["cpuhotplug"] = xmlnode.attrib["cpuhotplug"]
+
+	def parseFrontendTag(self, xmlroot):
+		# frontend  cpus
+		Node = "frontend"
+		self.parseCpu(xmlroot, Node)
+		self.parseMemory(xmlroot, Node)
+		self.parseBoot(xmlroot, Node)
+		self.parsePrivate(xmlroot, Node)
+		self.parsePublic(xmlroot, Node)
+		self.parseHD(xmlroot, Node)
+		self.parseSyssetting(xmlroot, Node)
+		self.parseStorage(xmlroot, Node)
+
+	def parseComputeTag(self, xmlroot):
+		# frontend  cpus
+		Node = "compute"
+		self.parseCpu(xmlroot, Node)
+		self.parseMemory(xmlroot, Node)
+		self.parseBoot(xmlroot, Node)
+		self.parsePrivate(xmlroot, Node)
+		self.parseHD(xmlroot, Node)
+		self.parseSyssetting(xmlroot, Node)
+		self.parseStorage(xmlroot, Node)
+
+	def parseCpu(self, xmlroot, Node):
+		xmlnode = xmlroot.findall("./%s" % Node)[0]
+		self.VM["cpus"] = xmlnode.attrib["cpus"]
+		if "count" in xmlnode.attrib:
+			self.VM["compute_count"] = xmlnode.attrib["count"]
+
+	def parseMemory(self, xmlroot, Node):
+		xmlnode = xmlroot.findall("./%s/memory" % Node)[0]
+		self.VM["mem_base"] = xmlnode.attrib["base"]
+		self.VM["mem_vram"] = xmlnode.attrib["vram"]
+
+	def parseBoot(self, xmlroot, Node):
+		xmlnode = xmlroot.findall("./%s/boot" % Node)[0]
+		str = xmlnode.attrib["order"]
+		items = str.split()
+		boot_order = ""
+		for n in range(0,len(items)):
+			boot_order += "--boot%d %s " % (n+1, items[n])
+		self.VM["boot_order"] = boot_order
+
+	def parsePrivate(self, xmlroot, Node):
+		xmlnode = xmlroot.findall("./%s/private" % Node)[0]
+		self.VM["private_nic"] = xmlnode.attrib["nic"]
+		self.VM["private_nictype"] = xmlnode.attrib["nictype"]
+		self.VM["private_nicname"] = xmlnode.attrib["nicname"]
+
+	def parsePublic(self, xmlroot, Node):
+		xmlnode = xmlroot.findall("./%s/public" % Node)[0]
+		self.VM["public_nic"] = xmlnode.attrib["nic"]
+		self.VM["public_nictype"] = xmlnode.attrib["nictype"]
+
+	def parseHD(self, xmlroot, Node):
+		xmlnode = xmlroot.findall("./%s/hd" % Node)[0]
+		self.VM["hd_size"] = xmlnode.attrib["size"]
+		self.VM["hd_variant"] = xmlnode.attrib["variant"]
+
+	def parseSyssetting(self, xmlroot, Node):
+		xmlnode = xmlroot.findall("./%s/syssetting" % Node)[0]
+		if "mouse" in xmlnode.attrib:
+			self.VM["mouse"] = xmlnode.attrib["mouse"]
+		if "audio" in xmlnode.attrib:
+			self.VM["audio"] = xmlnode.attrib["audio"]
+
+	def parseStorage(self, xmlroot, Node):
+		xmlnodes = xmlroot.findall("./%s/storage" % Node)
+		self.VM["storage"] = []
+		for node in xmlnodes:
+			ctl = {}
+			ctl["name"] = node.attrib["name"]
+			ctl["type"] = node.attrib["type"]
+			ctl["controller"] = node.attrib["controller"]
+			ctl["attr"] = node.attrib["attr"]
+			ctl["port"] = node.attrib["port"]
+			ctl["device"] = node.attrib["device"]
+			self.VM["storage"].append(ctl)
+
+	def getCmdOutput(self, cmd):
+		info, err = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+		if err:
+			self.logger.error("Failed to execute %s() with error: %s" % (cmd, err))
+			sys.exit()
+		return info
+
+	def commandCreateVm(self, name):
+		cmd = "%s list vms" % self.cmd
+		info = self.getCmdOutput(cmd)
+		lines = info.splitlines()
+		for line in lines:
+			if line.find(name) > 0: 
+				self.logger.error("Failed to create VM: %s already exists" % name)
+				sys.exit(-1)
+
+		template = "%s createvm --name %s --ostype %s --register" \
+					% (self.cmd, name, self.VM["iso_os"])
+		self.logger.info(template)
+
+	def commandModifyVm(self, name):
+		# memory and private nic settings
+		template = "%s modifyvm %s" % (self.cmd, name) \
+				+ " --memory %s --vram %s" % (self.VM["mem_base"], self.VM["mem_vram"]) \
+				+ " --nic1 %s --nictype1 %s --intnet1 %s" % (self.VM["private_nic"], self.VM["private_nictype"], self.VM["vm_network"])
+		# add public  nic for frontend
+		if self.VM.has_key("public_nic"):
+			template += " --nic2 %s --nictype2 %s" % (self.VM["public_nic"], self.VM["public_nictype"])
+
+		# add audio
+		if self.VM.has_key("audio"):
+			template += " --audio %s" % self.VM["audio"]
+
+		# add mouse
+		if self.VM.has_key("mouse"):
+			template += " --mouse %s" % self.VM["mouse"]
+
+		# add boot order
+		template += " %s" % self.VM["boot_order"] 
+
+		self.logger.info(template)
+
+		self.commandModifyHotPlug(name)
+		self.commandModifyCpu(name)
+
+	def commandModifyHotPlug(self, name):
+		# hotplug setting 
+		if self.VM["cpuhotplug"] == "on":
+			template = "%s modifyvm %s --cpuhotplug %s" % (self.cmd, name, self.VM["cpuhotplug"]) 
+		self.logger.info(template)
+
+	def commandModifyCpu(self, name):
+		# hotplufged cpu count 
+		if int(self.VM["cpus"]) > 1:
+			template = "%s modifyvm %s --cpus %s" % (self.cmd, name, self.VM["cpus"]) 
+			self.logger.info(template)
+
+
+	def commandCreateHd(self, name):
+		template = "%s createhd --filename %s.vdi --size %s --variant %s"  \
+				% (self.cmd, name, self.VM["hd_size"], self.VM["hd_variant"])
+		self.logger.info(template)
+
+	def commandStorageCtl(self, name, ctl):
+		template = "%s storagectl %s --name %s --add %s --controller %s" \
+				% (self.cmd, name, ctl["name"], ctl["type"], ctl["controller"])
+		self.logger.info(template)
+
+	def commandStorageAttach(self, name, ctl):
+		if ctl["attr"] == "dvddrive":
+			medium = self.VM["iso_path"]
+		else:
+			medium = "%s.vdi" % name
+		template = "%s storageattach %s" % (self.cmd, name) \
+				+ " --storagectl %s" % ctl["name"] \
+				+ " --port %s --device %s" % (ctl["port"], ctl["device"]) \
+				+ " --type %s" % ctl["attr"] \
+				+ " --medium %s" % medium 
+		self.logger.info(template)
+
+	def commandSharedFolder(self, name):
+		num_shared = len(self.VM["shared"])
+		for i in range (0, num_shared):
+			shared = self.VM["shared"][i]
+			template = "%s sharedfolder add %s" % (self.cmd, name) \
+				+ " --name %s --hostpath %s --automount" % (shared["shared_name"], shared["shared_path"]) 
+			self.logger.info(template)
+
+	def runFrontendCommands(self):
+		name = self.VM["vm_name"]
+		self.commandCreateVm(name)
+		self.commandModifyVm(name)
+		self.commandCreateHd(name)
+		num_ctl = len(self.VM["storage"])
+		for i in range(0, num_ctl):
+			ctl = self.VM["storage"][i]
+			self.commandStorageCtl(name, ctl)
+			self.commandStorageAttach(name, ctl)
+		self.commandSharedFolder(name)
+
+	def runComputeCommands(self):
+		base = self.VM["vm_name"]
+		num_computes = int(self.VM["compute_count"])
+		for i in range(0, num_computes):
+			name = base + "-compute-0-%d" % i
+			self.commandCreateVm(name)
+			self.commandModifyVm(name)
+			self.commandCreateHd(name)
+			ctl = self.VM["storage"][0]
+			self.commandStorageCtl(name, ctl)
+			self.commandStorageAttach(name, ctl)
+
+	def run(self):
+		self.parseConfig()
+		if self.type == "frontend":
+			self.runFrontendCommands()
+		else:
+			self.runComputeCommands()
+		#pprint(self.__dict__)
+
+if __name__ == "__main__":
+	app=VBwrapper(sys.argv)
+	app.run()
