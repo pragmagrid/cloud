@@ -3,7 +3,7 @@ Rocks Cluster in VirtualBox
 ============================================
 
 + Install VirtualBox software and Extensions per
-your downloaded version installations documents
+  your downloaded version installations documents
 
 + Download VBox Guest Additions ISO (ex. VBoxGuestAdditions_4.3.10.iso)
 
