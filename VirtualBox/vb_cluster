@@ -215,6 +215,7 @@ class VBwrapper:
 		template = "%s createvm --name %s --ostype %s --register" \
 					% (self.cmd, name, self.VM["iso_os"])
 		self.logger.info(template)
+		os.system(template)
 
 	def commandModifyVm(self, name):
 		# memory and private nic settings
@@ -237,6 +238,7 @@ class VBwrapper:
 		template += " %s" % self.VM["boot_order"] 
 
 		self.logger.info(template)
+		os.system(template)
 
 		self.commandModifyHotPlug(name)
 		self.commandModifyCpu(name)
@@ -246,23 +248,27 @@ class VBwrapper:
 		if self.VM["cpuhotplug"] == "on":
 			template = "%s modifyvm %s --cpuhotplug %s" % (self.cmd, name, self.VM["cpuhotplug"]) 
 		self.logger.info(template)
+		os.system(template)
 
 	def commandModifyCpu(self, name):
 		# hotplufged cpu count 
 		if int(self.VM["cpus"]) > 1:
 			template = "%s modifyvm %s --cpus %s" % (self.cmd, name, self.VM["cpus"]) 
 			self.logger.info(template)
+			os.system(template)
 
 
 	def commandCreateHd(self, name):
 		template = "%s createhd --filename %s.vdi --size %s --variant %s"  \
 				% (self.cmd, name, self.VM["hd_size"], self.VM["hd_variant"])
 		self.logger.info(template)
+		os.system(template)
 
 	def commandStorageCtl(self, name, ctl):
 		template = "%s storagectl %s --name %s --add %s --controller %s" \
 				% (self.cmd, name, ctl["name"], ctl["type"], ctl["controller"])
 		self.logger.info(template)
+		os.system(template)
 
 	def commandStorageAttach(self, name, ctl):
 		if ctl["attr"] == "dvddrive":
@@ -275,6 +281,7 @@ class VBwrapper:
 				+ " --type %s" % ctl["attr"] \
 				+ " --medium %s" % medium 
 		self.logger.info(template)
+		os.system(template)
 
 	def commandSharedFolder(self, name):
 		num_shared = len(self.VM["shared"])
@@ -283,6 +290,7 @@ class VBwrapper:
 			template = "%s sharedfolder add %s" % (self.cmd, name) \
 				+ " --name %s --hostpath %s --automount" % (shared["shared_name"], shared["shared_path"]) 
 			self.logger.info(template)
+			os.system(template)
 
 	def runFrontendCommands(self):
 		name = self.VM["vm_name"]
