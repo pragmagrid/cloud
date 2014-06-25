@@ -1,10 +1,11 @@
 ============================================
 Rocks Cluster in VirtualBox 
 ============================================
-Install VirtualBox software and Extensions per
+
++ Install VirtualBox software and Extensions per
 your downloaded version installations documents
 
-Download VBox Guest Additions ISO (ex. VBoxGuestAdditions_4.3.10.iso)
++ Download VBox Guest Additions ISO (ex. VBoxGuestAdditions_4.3.10.iso)
 
 
 How to Install Guest Additions
@@ -33,7 +34,7 @@ How to Install Guest Additions
 
    + Check that ISO is mounted ::  
 
-        **[root@fe Desktop]# mount**  
+        [root@fe Desktop]# mount  
         /dev/sda1 on / type ext4 (rw)  
         proc on /proc type proc (rw)  
         sysfs on /sys type sysfs (rw)  
@@ -48,7 +49,7 @@ How to Install Guest Additions
         /dev/sr0 on /media/VBOXADDITIONS_4.3.10_93012 type iso9660 (ro,nosuid,nodev,uhelper=udisks,uid=0,gid=0,iocharset=utf8,mode=0400,dmode=0500)  
         data1 on /media/sf_data1 type vboxsf (gid=399,rw)  
 
-        **[root@fe Desktop]# ls /media/VBOXADDITIONS_4.3.10_93012/**  
+        [root@fe Desktop]# ls /media/VBOXADDITIONS_4.3.10_93012/  
         32Bit         cert                   VBoxSolarisAdditions.pkg  
         64Bit         OS2                    VBoxWindowsAdditions-amd64.exe  
         AUTORUN.INF   runasroot.sh           VBoxWindowsAdditions.exe  
@@ -56,7 +57,7 @@ How to Install Guest Additions
 
    + Install Guest Additions ::
 
-        **[root@fe Desktop]# /media/VBOXADDITIONS_4.3.10_93012/VBoxLinuxAdditions.run **  
+        [root@fe Desktop]# /media/VBOXADDITIONS_4.3.10_93012/VBoxLinuxAdditions.run   
         Verifying archive integrity... All good.  
         Uncompressing VirtualBox 4.3.10 Guest Additions for Linux............  
         VirtualBox Guest Additions installer  
@@ -79,27 +80,27 @@ How to Install Guest Additions
 
    + Verify that mount works  ::
 
-        **[root@fe Desktop]# ls /media**  
+        [root@fe Desktop]# ls /media  
         sf_data1  VBOXADDITIONS_4.3.10_93012  
 
 	 There is now expected `sf_data1` mounted under /media
 
    + Copy the script to local direcotry (for installing guest additions on compute nodes) ::
 
-        **[root@fe Desktop]# mkdir /share/apps/root**   
-        **[root@fe Desktop]# cp /media/VBOXADDITIONS_4.3.10_93012/VBoxLinuxAdditions.run /share/apps/root**  
+        [root@fe Desktop]# mkdir /share/apps/root   
+        [root@fe Desktop]# cp /media/VBOXADDITIONS_4.3.10_93012/VBoxLinuxAdditions.run /share/apps/root  
 
    + Unmount CD: ::
 
-	    click on "Eject" on the VBOXADDITIONS_4.3.10* window  
+	    click on `Eject` on the `VBOXADDITIONS_4.3.10` window (on VM Desctop) 
 	    or  
-	    umount /media/VBOXADDITIONS_4.3.10_93012/  
+	    [root@fe Desktop]# umount /media/VBOXADDITIONS_4.3.10_93012/  
 
    + To install guest additions on compute nodes: ::
 
-        **[root@fe Desktop]# rocks run host compute /share/apps/root/VBoxLinuxAdditions.run**  
+        [root@fe Desktop]# rocks run host compute /share/apps/root/VBoxLinuxAdditions.run  
 
-     Note:: compute nodes must be installed with the same shared folder enabled as the frontend
+     Note: compute nodes must be installed with the same shared folder enabled as the frontend
 
 #. In VirtualBOx Manger remove the disk from virtual drive in `fe611 Storage` using 
    `Attributes` menu
