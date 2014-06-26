@@ -29,7 +29,7 @@ Install Frontend
 #. Create input xml configuration file ``vb-in.xml`` with your desired settings
 
    There is vb-in.template file that is provided for building a frontend and 2 compute nodes.
-   See details in the section :ref:`configfile` below.
+   See details in the section `Configuration File`_ below.
 
 #. Run script to create VM settings in VirtualBox::
 
