@@ -58,8 +58,8 @@ Rocks Cluster in VirtualBox
    
 #. **Install Guest Additions**
 
-Guest Additiosn allow to mount directories from the host computer to the guest VM and transfer files
-between the two. If you don't need mounting from the host skip this section.
+   Guest Additiosn allow to mount directories from the host computer to the guest VM and transfer files
+   between the two. If you don't need mounting from the host skip this section.
 
    #. Mount Guest Additions ISO to your VM using one of two methods:
 
@@ -158,7 +158,7 @@ between the two. If you don't need mounting from the host skip this section.
    with the VirtualBox. Most values are working defaults that don't need changes.::
 
    <vbc version="0.1">  
-      <vm name="x" private**="y"> - describes generic info for the cluster.
+      <vm **name**="x" **private**="y"> - describes generic info for the cluster.
                Name refers to VM name, private is a name of internal network. 
                Both are relevant on VBox side, not inside the cluster.
          <iso os="Linux_64" **path**="/path/to/boot-6.1.1.iso"/>  - type of VM's os and Rocks boot ISO path
@@ -166,7 +166,7 @@ between the two. If you don't need mounting from the host skip this section.
          <shared **name**="data2" path="/some/path2/data2"/> - host directory will be automounted on guest VM
          <enable cpuhotplug="on" />
       </vm>
-      <frontend cpus="2">
+      <frontend **cpus**="2">
          <memory base="2000" vram="32" /> - allocate base and video memory to VM
          <boot order="dvd disk none none" /> - boot order 
          <private nic="intnet" nictype="82540EM" nicname="default"/> - NIC default settings for private network 
@@ -176,7 +176,7 @@ between the two. If you don't need mounting from the host skip this section.
          <storage name="SATA" type="sata" controller="IntelAhci" attr="hdd" port="0" device="0"/> - information for VM disk image
          <storage name="IDE" type="ide" controller="PIIX4" attr="dvddrive" port="0" device="0"/> - information for VM CD/DVD drive
       </frontend>
-      <compute cpus="1" count="2"> - numberof cpus per compute node and number of compute nodes to create
+      <compute **cpus**="1" **count**="2"> - numberof cpus per compute node and number of compute nodes to create
          <memory base="1000" vram="32" /> - allocate base and video memory to VM
          <boot order="net disk none none" />
          <private nic="intnet" nictype="82540EM" nicname="default"/> - NIC settings for private network
