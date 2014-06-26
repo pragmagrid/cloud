@@ -158,21 +158,22 @@ Rocks Cluster in VirtualBox
    with the VirtualBox. Most values are working defaults that don't need changes.::
 
    <vbc version="0.1">  
+     
       <vm name="x" private="y">  
                describes generic info for the cluster  
                Name refers to VM name, private is a name of internal network   
                Both are relevant on VBox side, not inside the cluster  
-         <iso os="Linux_64" **path**="/path/to/boot-6.1.1.iso"/>  
-               type of VM's os and Rocks boot ISO path  
-         <shared **name**="data1" path="/some/path1/data1"/>  
-               host directory will be automounted on guest VM   
-         <shared **name**="data2" path="/some/path2/data2"/>  
-               host directory will be automounted on guest VM   
+         <iso os="Linux_64" path="/path/to/boot-6.1.1.iso"/>  
+                  type of VM's os and Rocks boot ISO path  
+         <shared name="data1" path="/some/path1/data1"/>  
+                  host directory will be automounted on guest VM   
+         <shared name="data2" path="/some/path2/data2"/>  
+                  host directory will be automounted on guest VM   
          <enable cpuhotplug="on" />  
-               enables changing cpus number on powered off and running VM  
-      </vm>  
-       
-      <frontend **cpus**="2">  
+                  enables changing cpus number on powered off and running VM  
+      </vm>    
+        
+      <frontend cpus="2">  
          <memory base="2000" vram="32" />  
                allocate base and video memory to VM  
          <boot order="dvd disk none none" />  
@@ -191,8 +192,8 @@ Rocks Cluster in VirtualBox
                information for VM CD/DVD drive  
       </frontend>  
         
-      <compute **cpus**="1" **count**="2">  
-               numberof cpus per compute node and number of compute nodes to create  
+      <compute cpus="1" count="2">  
+               number of cpus per compute node and number of compute nodes to create  
          <memory base="1000" vram="32" />  
                allocate base and video memory to VM  
          <boot order="net disk none none" />  
@@ -205,5 +206,6 @@ Rocks Cluster in VirtualBox
                audio   
          <storage name="SATA" type="sata" controller="IntelAhci" attr="hdd" port="0" device="0"/>  
                information for VM disk image  
-      </compute>  
+      </compute>   
+        
    </vbc>  
