@@ -18,8 +18,8 @@ This page explains how to install Rocks cluster in VirtualBox.
 Prerequisites
 =====================
 
-+ Install VirtualBox software and Extensions per
-  your downloaded version installations documents
++ Download and install ``VirtualBox`` and ``VirtualBox Oracle VM VirtualBox Extension Pack`` 
+  from `VirtualBox <https://www.virtualbox.org>`_ web site
 + Download VBox Guest Additions ISO (ex. VBoxGuestAdditions_4.3.10.iso)
 + Download Rocks boot ISO from `Rocks <http://www.rocksclusters.org>`_  web site
 
