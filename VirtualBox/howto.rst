@@ -157,8 +157,7 @@ Rocks Cluster in VirtualBox
    are used to create all vboxmanage commands needed to define and register VMs
    with the VirtualBox. Most values are working defaults that don't need changes.::
 
-   <vbc version="0.1">  
-     
+     <vbc version="0.1">  
       <vm name="x" private="y">  
                describes generic info for the cluster  
                Name refers to VM name, private is a name of internal network   
@@ -174,6 +173,7 @@ Rocks Cluster in VirtualBox
       </vm>    
         
       <frontend cpus="2">  
+               number of cpus 
          <memory base="2000" vram="32" />  
                allocate base and video memory to VM  
          <boot order="dvd disk none none" />  
@@ -207,5 +207,4 @@ Rocks Cluster in VirtualBox
          <storage name="SATA" type="sata" controller="IntelAhci" attr="hdd" port="0" device="0"/>  
                information for VM disk image  
       </compute>   
-        
-   </vbc>  
+     </vbc>  
