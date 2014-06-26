@@ -22,6 +22,7 @@ Prerequisites
   from `VirtualBox <https://www.virtualbox.org>`_ web site
 + Download VBox Guest Additions ISO (ex. VBoxGuestAdditions_4.3.10.iso)
 + Download Rocks boot ISO from `Rocks <http://www.rocksclusters.org>`_  web site
++ Download ``vb_cluster`` and vb-in.template from `this repo <https://github.com/pragmagrid/cloud/tree/master/VirtualBox>`_
 
 Install Frontend
 ========================
