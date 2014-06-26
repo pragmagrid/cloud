@@ -41,6 +41,7 @@ class VBwrapper:
 
 
 	def checkCommand(self):
+		"""verify VBox command exists"""
 		cmd = "which vboxmanage"
 		try:  
 			out = subprocess.check_output(cmd, shell=True)
@@ -71,8 +72,8 @@ class VBwrapper:
 		self.logger.addHandler(ch)
 		self.logger.addHandler(fh)
 
-
 	def parseConfig(self):
+		"""parse input xml file """
 		if not os.path.isfile(self.config): 
 			self.parser.error(self.errors["errConfig"] % self.config)
 
@@ -91,7 +92,6 @@ class VBwrapper:
 
 	def parseVmTag(self, xmlroot):
 		"""parse <vm> tag info"""
-
 		self.VM = {}
 		# VM and network names
 		xmlnode = xmlroot.findall("./vm")[0]
@@ -118,7 +118,7 @@ class VBwrapper:
 			self.VM["cpuhotplug"] = xmlnode.attrib["cpuhotplug"]
 
 	def parseFrontendTag(self, xmlroot):
-		# frontend  cpus
+		"""parse <frontend> tag info"""
 		Node = "frontend"
 		self.parseCpu(xmlroot, Node)
 		self.parseMemory(xmlroot, Node)
@@ -130,9 +130,10 @@ class VBwrapper:
 		self.parseStorage(xmlroot, Node)
 
 	def parseComputeTag(self, xmlroot):
-		# frontend  cpus
+		"""parse <compute> tag info"""
 		Node = "compute"
 		self.parseCpu(xmlroot, Node)
+		self.parseComputeCount(xmlroot, Node)
 		self.parseMemory(xmlroot, Node)
 		self.parseBoot(xmlroot, Node)
 		self.parsePrivate(xmlroot, Node)
@@ -141,17 +142,24 @@ class VBwrapper:
 		self.parseStorage(xmlroot, Node)
 
 	def parseCpu(self, xmlroot, Node):
+		"""find number of cpus requested """
 		xmlnode = xmlroot.findall("./%s" % Node)[0]
 		self.VM["cpus"] = xmlnode.attrib["cpus"]
+
+	def parseComputeCount(self, xmlroot, Node):
+		"""find number of compute nodes"""
+		xmlnode = xmlroot.findall("./%s" % Node)[0]
 		if "count" in xmlnode.attrib:
 			self.VM["compute_count"] = xmlnode.attrib["count"]
 
 	def parseMemory(self, xmlroot, Node):
+		"""find memory requests"""
 		xmlnode = xmlroot.findall("./%s/memory" % Node)[0]
 		self.VM["mem_base"] = xmlnode.attrib["base"]
 		self.VM["mem_vram"] = xmlnode.attrib["vram"]
 
 	def parseBoot(self, xmlroot, Node):
+		"""find boot order"""
 		xmlnode = xmlroot.findall("./%s/boot" % Node)[0]
 		str = xmlnode.attrib["order"]
 		items = str.split()
@@ -161,22 +169,26 @@ class VBwrapper:
 		self.VM["boot_order"] = boot_order
 
 	def parsePrivate(self, xmlroot, Node):
+		"""find private nic info"""
 		xmlnode = xmlroot.findall("./%s/private" % Node)[0]
 		self.VM["private_nic"] = xmlnode.attrib["nic"]
 		self.VM["private_nictype"] = xmlnode.attrib["nictype"]
 		self.VM["private_nicname"] = xmlnode.attrib["nicname"]
 
 	def parsePublic(self, xmlroot, Node):
+		"""find public nic info"""
 		xmlnode = xmlroot.findall("./%s/public" % Node)[0]
 		self.VM["public_nic"] = xmlnode.attrib["nic"]
 		self.VM["public_nictype"] = xmlnode.attrib["nictype"]
 
 	def parseHD(self, xmlroot, Node):
+		"""find disk image info"""
 		xmlnode = xmlroot.findall("./%s/hd" % Node)[0]
 		self.VM["hd_size"] = xmlnode.attrib["size"]
 		self.VM["hd_variant"] = xmlnode.attrib["variant"]
 
 	def parseSyssetting(self, xmlroot, Node):
+		"""find mouse and audio info"""
 		xmlnode = xmlroot.findall("./%s/syssetting" % Node)[0]
 		if "mouse" in xmlnode.attrib:
 			self.VM["mouse"] = xmlnode.attrib["mouse"]
@@ -184,6 +196,7 @@ class VBwrapper:
 			self.VM["audio"] = xmlnode.attrib["audio"]
 
 	def parseStorage(self, xmlroot, Node):
+		"""find attached controller and disk info"""
 		xmlnodes = xmlroot.findall("./%s/storage" % Node)
 		self.VM["storage"] = []
 		for node in xmlnodes:
@@ -197,6 +210,7 @@ class VBwrapper:
 			self.VM["storage"].append(ctl)
 
 	def getCmdOutput(self, cmd):
+		"""get output of command line"""
 		info, err = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
 		if err:
 			self.logger.error("Failed to execute %s() with error: %s" % (cmd, err))
@@ -204,6 +218,7 @@ class VBwrapper:
 		return info
 
 	def commandCreateVm(self, name):
+		"""create and run createvm command"""
 		cmd = "%s list vms" % self.cmd
 		info = self.getCmdOutput(cmd)
 		lines = info.splitlines()
@@ -218,6 +233,7 @@ class VBwrapper:
 		os.system(template)
 
 	def commandModifyVm(self, name):
+		"""create and run modifyvm command"""
 		# memory and private nic settings
 		template = "%s modifyvm %s" % (self.cmd, name) \
 				+ " --memory %s --vram %s" % (self.VM["mem_base"], self.VM["mem_vram"]) \
@@ -244,6 +260,7 @@ class VBwrapper:
 		self.commandModifyCpu(name)
 
 	def commandModifyHotPlug(self, name):
+		"""create and run modifyvm command for hot plug cpu"""
 		# hotplug setting 
 		if self.VM["cpuhotplug"] == "on":
 			template = "%s modifyvm %s --cpuhotplug %s" % (self.cmd, name, self.VM["cpuhotplug"]) 
@@ -251,26 +268,29 @@ class VBwrapper:
 		os.system(template)
 
 	def commandModifyCpu(self, name):
+		"""create and run modifyvm command for hot plug cpu count"""
 		# hotplufged cpu count 
 		if int(self.VM["cpus"]) > 1:
 			template = "%s modifyvm %s --cpus %s" % (self.cmd, name, self.VM["cpus"]) 
 			self.logger.info(template)
 			os.system(template)
 
-
 	def commandCreateHd(self, name):
+		"""create and run createhd command"""
 		template = "%s createhd --filename %s.vdi --size %s --variant %s"  \
 				% (self.cmd, name, self.VM["hd_size"], self.VM["hd_variant"])
 		self.logger.info(template)
 		os.system(template)
 
 	def commandStorageCtl(self, name, ctl):
+		"""create and run storagectl command"""
 		template = "%s storagectl %s --name %s --add %s --controller %s" \
 				% (self.cmd, name, ctl["name"], ctl["type"], ctl["controller"])
 		self.logger.info(template)
 		os.system(template)
 
 	def commandStorageAttach(self, name, ctl):
+		"""create and run storageattach command"""
 		if ctl["attr"] == "dvddrive":
 			medium = self.VM["iso_path"]
 		else:
@@ -284,6 +304,7 @@ class VBwrapper:
 		os.system(template)
 
 	def commandSharedFolder(self, name):
+		"""create and run sharedfolder command"""
 		num_shared = len(self.VM["shared"])
 		for i in range (0, num_shared):
 			shared = self.VM["shared"][i]
@@ -292,8 +313,8 @@ class VBwrapper:
 			self.logger.info(template)
 			os.system(template)
 
-	def runFrontendCommands(self):
-		name = self.VM["vm_name"]
+	def runCommands(self, name):
+		"""run commands for creating and registering VM in VBox"""
 		self.commandCreateVm(name)
 		self.commandModifyVm(name)
 		self.commandCreateHd(name)
@@ -304,24 +325,18 @@ class VBwrapper:
 			self.commandStorageAttach(name, ctl)
 		self.commandSharedFolder(name)
 
-	def runComputeCommands(self):
-		base = self.VM["vm_name"]
-		num_computes = int(self.VM["compute_count"])
-		for i in range(0, num_computes):
-			name = base + "-compute-0-%d" % i
-			self.commandCreateVm(name)
-			self.commandModifyVm(name)
-			self.commandCreateHd(name)
-			ctl = self.VM["storage"][0]
-			self.commandStorageCtl(name, ctl)
-			self.commandStorageAttach(name, ctl)
-
 	def run(self):
 		self.parseConfig()
 		if self.type == "frontend":
-			self.runFrontendCommands()
+			name = self.VM["vm_name"]
+			self.runCommands(name)
 		else:
-			self.runComputeCommands()
+			base = self.VM["vm_name"]
+			num_computes = int(self.VM["compute_count"])
+			for i in range(0, num_computes):
+				name = base + "-compute-0-%d" % i
+				self.runCommands(name)
+
 		#pprint(self.__dict__)
 
 if __name__ == "__main__":
