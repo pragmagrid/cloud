@@ -128,7 +128,8 @@ Rocks Cluster in VirtualBox
          # ls /media  
          sf_data1  VBOXADDITIONS_4.3.10_93012  
    
-	    There is now expected ``sf_data1`` mounted under /media
+	There is now expected ``sf_data1`` mounted under /media for a directory that was
+	specified in ``Shared Folders`` settings with name ``data``.
 
       + Copy the script to local directory (for installing guest additions on compute nodes) ::
 
@@ -165,9 +166,9 @@ Rocks Cluster in VirtualBox
          <iso os="Linux_64" path="/path/to/boot-6.1.1.iso"/>  
                   type of VM's os and Rocks boot ISO path  
          <shared name="data1" path="/some/path1/data1"/>  
-                  host directory will be automounted on guest VM   
+                  host directory from path  will be automounted on guest VM as /mediasf_data1 
          <shared name="data2" path="/some/path2/data2"/>  
-                  host directory will be automounted on guest VM   
+                  host directory  from path will be automounted on guest VM as /media/sf_data2  
          <enable cpuhotplug="on" />  
                   enables changing cpus number on powered off and running VM  
       </vm>    
