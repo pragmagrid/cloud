@@ -29,7 +29,7 @@ Install Frontend
 #. Create input xml configuration file ``vb-in.xml`` with your desired settings
 
    There is vb-in.template file that is provided for building a frontend and 2 compute nodes.
-   See details in the section `Configuration file`_ below
+   See details in the section :ref:`configfile` below.
 
 #. Run script to create VM settings in VirtualBox::
 
@@ -168,7 +168,9 @@ between the two. If you don't need mounting from the host skip this section.
    
 #. In VirtualBox Manager remove the disk from virtual drive in ``VMname Storage`` using 
    ``Attributes`` menu
-	
+
+.. _configfile:
+
 Configuration file
 ====================
 
