@@ -231,3 +231,25 @@ with the VirtualBox. Most values are working defaults that don't need changes.::
                information for VM disk image  
       </compute>   
      </vbc>  
+
+Starting VBox after TimeMachine restore
+=========================================
+
+If your VirtualBox was restored among other applications from TimeMachine backup
+the needed daemons and devices (/dev/vboxdrv /dev/vboxdrvu /dev/vboxnetctl) may no 
+longer be present on the Mac host.  The following steps fix this issue. These steps may also be needed
+if /dev/vbox* get lost. 
+
+#. Recreate launchctl startup ::
+
+    sudo su
+    cd /Library/LaunchDaemons/
+    ln -s ../Application\ Support/VirtualBox/LaunchDaemons/org.virtualbox.startup.plist .
+    launchctl load /Library/LaunchDaemons/org.virtualbox.startup.plist
+    
+#. Recreate host only networks
+
+   + Start VirtualBox  
+   + From  ``Preferences...`` open ``Network`` tab  
+   + Choose ``Host-only Networks`` tab and click on add icon (plus sign) to add the network 
+   + Confirm  with ``Ok`` button  
