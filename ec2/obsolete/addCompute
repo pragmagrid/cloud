@@ -1,0 +1,45 @@
+#!/bin/bash
+
+setDefaults () {
+    # find what compute node is added
+    if [ $# -ne 1 ] ; then
+        echo "Usage: $0 <node ip>"
+        exit
+    fi
+
+    IP=$1
+    rank=`echo $IP | awk -F"." '{print $4-6}'`
+    HOSTNAME=compute-0-$rank
+}
+
+sendKeys () {
+    # send root ssh key to compute node
+    echo "Send public key to host $HOSTNAME"
+    cat /root/.ssh/id_rsa.pub |  ssh -i /root/.ssh/cluster $IP "cat >> /root/.ssh/authorized_keys"
+
+}
+
+addHost () {
+    echo "Adding host $HOSTNAME"
+    rocks add host $HOSTNAME membership="Compute"
+    rocks add host interface $HOSTNAME iface=eth0 subnet=private ip=$IP netmask=255.255.255.0
+}
+
+syncHost () {
+    echo "Syncing rocks configuration"
+    rocks sync config
+    echo "Syncing network"
+    rocks sync host network
+    echo "Run hostname $HOSTNAME on $HOSTNAME"
+    rocks run host $HOSTNAME "hostname $HOSTNAME"
+}
+
+updateHost () {
+    rocks run host $HOSTNAME /root/utils/VMcompute
+}
+
+setDefaults $@
+sendKeys 
+addHost
+syncHost
+updateHost

@@ -1,0 +1,751 @@
+#!/bin/bash
+
+#################################
+#   functions for general setup
+#################################
+
+CheckIfEC2 () {
+    # find if we are on the cloud
+    x=$(curl -sf http://169.254.169.254/latest/)
+    if [ "$x" == "" ] ; then
+       EC2="" 
+    else
+       EC2="EC2" 
+    fi
+}
+
+SetDefaults () {
+    # sets the log file and order of xml files processing
+    LOG=/tmp/VMchange.log
+    SAVE=/root/prev-config
+    if [ ! -d $SAVE ] ; then
+        mkdir $SAVE
+    fi
+
+    # nodes xml files location
+    NODE_DIR=/state/partition1/rocks/install/rocks-dist/x86_64/build/nodes
+
+    # xml files processing order
+    ORDER=" 
+    rlo 
+    autofs-server  
+    apache  
+    wordpress-data  
+    dns-server  
+    sge-server  
+    networking-server  
+    dhcp-server  
+    condor-server  
+    ca  
+    ssl-server  
+    server-firewall  
+    411-server  
+    bio-base  
+    mail-server 
+    ntp-server  
+    pdb2pqr-server  
+    "
+}
+
+StartLog () {
+    touch $LOG
+    if [ -f $LOG ] ; then
+        rm -rf $LOG
+    fi
+    echo "Start: " `date` >> $LOG
+}
+
+EndLog () {
+    echo "End: " `date` >> $LOG
+}
+
+
+##################################
+#   functions to update cluster db
+##################################
+
+SetName() {
+    # update host name
+    echo "Running SetName" >> $LOG
+    /bin/echo "update catindex  set Name='$NEW_NAME' where Name='$OLD_NAME' and Category=(select ID from categories where Name='host');" > /tmp/name-update.sql
+    /opt/rocks/bin/mysql -u apache cluster < /tmp/name-update.sql  >> $LOG 2>&1
+    rocks set host name frontend $NEW_NAME  >> $LOG 2>&1
+    rocks set attr hostname $NEW_NAME  >> $LOG 2>&1
+    rocks set attr tripwire_mail root@localhost >> $LOG 2>&1
+    sed -i "s/$OLD_NAME/$NEW_NAME/" /etc/auto.home
+}
+
+SetEth0() {
+    # update eth0 
+    echo "Running SetEth0" >> $LOG
+    rocks set host interface subnet frontend eth0 private >> $LOG 2>&1
+    rocks set host interface ip     frontend eth0 $IP_0 >> $LOG 2>&1
+    rocks set host interface name   frontend eth0 $NEW_NAME  >> $LOG 2>&1
+    rocks set host interface mac    frontend eth0 $HWADDR_0 >> $LOG 2>&1
+
+    rocks set attr Kickstart_PrivateHostname    $NEW_NAME  >> $LOG 2>&1
+    rocks set attr Kickstart_PrivateNetmask     $NETMASK_0 >> $LOG 2>&1
+    rocks set attr Kickstart_PrivateNetmaskCIDR $CIDR_0 >> $LOG 2>&1
+    rocks set attr Kickstart_PrivateAddress     $IP_0 >> $LOG 2>&1
+    rocks set attr Kickstart_PrivateBroadcast   $BROADCAST_0 >> $LOG 2>&1
+    rocks set attr Kickstart_PrivateNetwork     $SUBNET_0 >> $LOG 2>&1
+    
+    rocks set network subnet private   $SUBNET_0 >> $LOG 2>&1
+    rocks set network netmask private  $NETMASK_0 >> $LOG 2>&1
+    rocks set network zone private     $DNS_DOMAIN_0 >> $LOG 2>&1
+    rocks set network servedns private true >> $LOG 2>&1
+    
+    rocks set attr Kickstart_PrivateDNSDomain  $DNS_DOMAIN_0 >> $LOG 2>&1
+    rocks set attr Kickstart_PrivateDNSServers $IP_0 >> $LOG 2>&1
+    rocks set attr Kickstart_PrivateGateway    $IP_0  >> $LOG 2>&1
+}
+
+SetEth1() {
+    # update eth1 
+    echo "Running SetEth1" >> $LOG
+    rocks set host interface subnet frontend eth1 public >> $LOG 2>&1
+    rocks set host interface ip     frontend eth1 $IP_1 >> $LOG 2>&1
+    rocks set host interface name   frontend eth1 $NEW_NAME_1  >> $LOG 2>&1
+    rocks set host interface mac    frontend eth1 $HWADDR_1 >> $LOG 2>&1
+    
+    rocks set attr Kickstart_PublicHostname    $FQDN >> $LOG 2>&1
+    rocks set attr Kickstart_PublicNetmask     $NETMASK_1 >> $LOG 2>&1
+    rocks set attr Kickstart_PublicNetmaskCIDR $CIDR_1 >> $LOG 2>&1
+    rocks set attr Kickstart_PublicAddress     $IP_1 >> $LOG 2>&1
+    rocks set attr Kickstart_PublicBroadcast   $BROADCAST_1 >> $LOG 2>&1
+    rocks set attr Kickstart_PublicNetwork     $SUBNET_1 >> $LOG 2>&1
+    
+    rocks set network subnet public   $SUBNET_1 >> $LOG 2>&1
+    rocks set network netmask public  $NETMASK_1 >> $LOG 2>&1
+
+    rocks remove network ec2private
+    rocks remove network ec2public
+    rocks remove network ec2tunnel
+
+    rocks set network zone public     $DNS_DOMAIN_1 >> $LOG 2>&1
+    rocks set network servedns public false >> $LOG 2>&1
+
+    rocks set attr Kickstart_PublicDNSDomain    $DNS_DOMAIN_1 >> $LOG 2>&1
+    rocks set attr Kickstart_PublicDNSServers   $DNS_SERVER_1 >> $LOG 2>&1
+    rocks set attr Kickstart_PublicGateway      $GATEWAY_1 >> $LOG 2>&1
+}
+
+SetRoute() {
+    # update routing
+    echo "Running SetRoutes" >> $LOG
+    rocks remove route $OLD_IP >> $LOG 2>&1
+    rocks remove host route 0.0.0.0 >> $LOG 2>&1
+    rocks add route $IP_1 $IP_0 netmask=255.255.255.255 >> $LOG 2>&1
+    rocks add host route $NEW_NAME 0.0.0.0 $GATEWAY_1 netmask=0.0.0.0 >> $LOG 2>&1
+}
+
+SaveOrigDB () {
+    # save original rocks db
+    export HOME=/root
+    BACKUPDB=/var/db/mysql-backup-cluster.$OLD_NAME
+    if [ ! -f $BACKUPDB ] ; then
+        /opt/rocks/bin/mysqldump -u apache --opt cluster > $BACKUPDB
+    fi
+
+}
+
+UpdateDB () {
+    # run all updates in order
+    SetName
+    SetEth0
+    SetEth1
+    SetRoute
+    /opt/rocks/bin/rocks set attr Condor_Master value=$NEW_NAME.$DNS_DOMAIN_0
+    /opt/rocks/bin/rocks set attr vtunServer value=$FQDN
+    /opt/rocks/bin/rocks set attr opal_public_fqdn value=$FQDN
+}
+
+#########################################
+### prepare opal for an update 
+PrepOpal () {
+    service tomcat-opal stop
+}
+
+#########################################
+### prepare Condor for an update 
+PrepCondor () {
+    echo "Running PrepCondor" >> $LOG
+    service rocks-condor stop
+    ips=`ps -ef | grep condor | grep -v grep | awk '{print $2}'`
+    for i in $ips ;
+    do
+        kill -9  $i
+    done
+}
+
+#########################################
+### prepare SGE for an update 
+PrepSGE() {
+    # disable previous sgemaster.$OLD_NAME stop
+    echo "Running PrepSGE" >> $LOG
+    sgemaster=
+    if [ -f /etc/init.d/sgemaster.$OLD_NAME ]; then 
+        /etc/init.d/sgemaster.$OLD_NAME stop
+        chkconfig --del sgemaster.$OLD_NAME
+        mv /etc/init.d/sgemaster.$OLD_NAME $SAVE
+    fi
+    if [ -f /etc/init.d/sgeexecd.$OLD_NAME ]; then 
+        /etc/init.d/sgeexecd.$OLD_NAME stop
+        chkconfig --del sgeexecd.$OLD_NAME 
+        mv /etc/init.d/sgeexecd.$OLD_NAME $SAVE
+    fi
+    sed -i "s/$OLD_NAME/$NEW_NAME/" /opt/gridengine/util/install_modules/sge_configuration.conf
+    mv /opt/gridengine/default /opt/gridengine/default.$OLD_NAME
+}
+
+#############################################
+#   functions to create and run post sections 
+#############################################
+CreatePosts() {
+    # create updated attributes list and for each xml file 
+    # recreate post section in order
+    echo "Running CreatePosts" >> $LOG
+
+    rocks report host attr pydict=true | tr -d '\n' > /tmp/attrs
+
+    for i in $ORDER 
+    do
+        echo "   Processing $i.xml "
+        echo "   Processing $i.xml " >> $LOG 
+        /bin/cat $NODE_DIR/$i.xml | rocks report post attrs="`cat /tmp/attrs`" > /tmp/do-$i.sh
+        /bin/chmod +x /tmp/do-$i.sh
+    done
+
+    # rewrite post sections: origunal posts have steps that don't need to be repeated
+    RewriteFirewall
+    RewriteCondor
+    RewriteOpal
+    RewritePdb2pqr
+    RewriteSGE
+
+}
+
+RunPosts() {
+    # run created post sections in order
+    echo "Running RunPosts" >> $LOG 
+
+    for i in $ORDER 
+    do
+        echo "    Running /tmp/do-$i.sh " 
+        echo "    Running /tmp/do-$i.sh " >> $LOG
+        /tmp/do-$i.sh >> $LOG 2>&1
+    done
+    echo "    Running /tmp/do-opal.sh " 
+    echo "    Running /tmp/do-opal.sh " >> $LOG
+    /tmp/do-opal.sh >> $LOG 2>&1
+
+    # sync all configuration
+    echo "Running sync commands" >> $LOG 
+    rocks report host route localhost | rocks report script | /bin/sh  
+    echo "        rocks sync config" >> $LOG 
+    rocks sync config
+    echo "        rocks sync host condor localhost" >> $LOG 
+    rocks sync host condor localhost
+    echo "        rocks sync host firewall localhost" >> $LOG 
+    rocks sync host firewall localhost
+    echo "        rocks sync host network localhost" >> $LOG 
+    rocks sync host network localhost
+    echo "        rocks sync host sec_attr " >> $LOG 
+    rocks sync host sec_attr
+    echo "        rocks sync host sharedkey " >> $LOG 
+    rocks sync host sharedkey
+
+    # needed for curl to work on eth0
+    route del -net 169.254.0.0/16
+
+    # run post-90 scripts
+    echo "Running post-90-condor" 
+    echo "Running post-90-condor" >> $LOG 
+    service rocks-condor start
+
+    echo "Running post-90-sge-server" 
+    echo "Running post-90-sge-server" >> $LOG 
+    /etc/rc.d/rocksconfig.d/post-90-sge-server
+    iscripts=`(cd /etc/init.d; ls sge*)`
+    for i in $iscripts; do 
+        chkconfig --add $i
+        chkconfig $i on
+    done
+    rm -rf /etc/rc.d/rocksconfig.d/post-90-sge-server
+
+    echo "Running tomcat opal deployment" 
+    echo "Running tomcat opal deployment" >> $LOG 
+    service tomcat-opal start
+    sleep 60
+    /bin/su tomcat -c "/opt/opal/deployed/deploy.sh" &> /tmp/opal-deploy.log
+
+}
+
+RewriteSGE() {
+echo "Running RewriteSGE" >> $LOG
+cat > /tmp/do-sge-server.sh << ROCKS-KS-POST
+#!/bin/bash 
+
+cat > /etc/rc.d/rocksconfig.d/post-90-sge-server << 'EOF'
+#!/bin/bash 
+
+. /etc/profile.d/sge-binaries.sh
+
+# Setup QMaster
+cd $SGE_ROOT && \
+        ./inst_sge -m -auto ./util/install_modules/sge_configuration.conf
+
+echo "$NEW_NAME.local $NEW_NAME_1.$DNS_DOMAIN_1 $NEW_NAME" >  $SGE_ROOT/$SGE_CELL/common/host_aliases
+
+cat default/common/configuration | sed -e "s/reporting=false/reporting=true/g" -e "s/joblog=false/joblog=true/g" > /tmp/sge-default-common-config.conf
+mv -f /tmp/sge-default-common-config.conf default/common/configuration
+chown 400:400 default/common/configuration
+
+/etc/rc.d/init.d/sgemaster.$NEW_NAME start
+
+# add default MPI parallel environments
+$SGE_ROOT/bin/$SGE_ARCH/qconf -Ap $SGE_ROOT/mpi/rocks-mpich.template >> /dev/null 2>&1
+$SGE_ROOT/bin/$SGE_ARCH/qconf -Ap $SGE_ROOT/mpi/rocks-mpi.template   >> /dev/null 2>&1
+$SGE_ROOT/bin/$SGE_ARCH/qconf -Ap $SGE_ROOT/mpi/rocks-ompi.template  >> /dev/null 2>&1
+
+# add this node as a submit host
+$SGE_ROOT/bin/$SGE_ARCH/qconf -as $NEW_NAME  >> /dev/null 2>&1
+
+# add mpich mpi openmpi to all.q pe list
+$SGE_ROOT/bin/$SGE_ARCH/qconf -rattr queue pe_list 'make mpich mpi orte' all.q  >> /dev/null 2>&1
+
+/opt/rocks/bin/rocks sync config
+
+# sets up the execution node
+/opt/rocks/bin/rocks report host sge config $NEW_NAME | \\
+        /opt/rocks/bin/rocks report script \\
+        > /tmp/do-sge-conf-file.sh
+
+chmod a+x /tmp/do-sge-conf-file.sh
+/tmp/do-sge-conf-file.sh
+
+echo "EXEC_HOST_LIST=\"$NEW_NAME\"" >> $SGE_ROOT/util/install_modules/sge_host_config.conf
+
+SET_HOST_TYPE=' -x -s '
+
+cd $SGE_ROOT && \\
+        ./inst_sge -noremote \$SET_HOST_TYPE -auto \\
+        ./util/install_modules/sge_host_config.conf > /tmp/sge-log 2>&1
+EOF
+chmod 0755 /etc/rc.d/rocksconfig.d/post-90-sge-server
+
+ROCKS-KS-POST
+/bin/chmod +x /tmp/do-sge-server.sh
+
+}
+
+RewriteFirewall() {
+echo "Running RewriteFirewall" >> $LOG
+cat > /tmp/do-server-firewall.sh << ROCKS-KS-POST
+#!/bin/bash
+
+#/bin/echo "update catindex \\
+#    set Name='$NEW_NAME' where Name='$OLD_NAME' and \\
+#    Category=(select ID from categories where Name='host');" \\
+#    | /opt/rocks/bin/mysql -u apache cluster
+
+
+rocks remove firewall host=localhost rulename=MASQUERADE
+
+/opt/rocks/bin/rocks add firewall host=localhost output-network=private \\
+        service="nat" protocol="all" action="MASQUERADE" \\
+        chain="POSTROUTING" rulename="MASQUERADE" rulesrc="system"
+
+/opt/rocks/bin/rocks report host firewall localhost | \\
+        /opt/rocks/bin/rocks report script \\
+        attrs="{'Kickstart_PublicNetwork':'$SUBNET_1', \\
+        'Kickstart_PublicNetmask':'$NETMASK_1'}" \\
+        > /tmp/do-firewall.sh
+
+chmod a+x /tmp/do-firewall.sh
+/tmp/do-firewall.sh
+ROCKS-KS-POST
+/bin/chmod +x /tmp/do-server-firewall.sh
+
+}
+
+RewriteCondor() {
+echo "Running RewriteCondor" >> $LOG
+cat > /tmp/do-condor-server.sh << ROCKS-KS-POST
+#!/bin/bash
+
+/opt/rocks/bin/rocks set attr Condor_Master value=$NEW_NAME
+
+if [ ! -f /etc/rc.d/rocksconfig.d/RCS/post-90-condor-server,v ]; then
+        if [ ! -f /etc/rc.d/rocksconfig.d/post-90-condor-server ]; then
+                touch /etc/rc.d/rocksconfig.d/post-90-condor-server;
+        fi
+        if [ ! -d /etc/rc.d/rocksconfig.d/RCS ]; then
+                mkdir -m 700 /etc/rc.d/rocksconfig.d/RCS
+                chown 0:0 /etc/rc.d/rocksconfig.d/RCS
+        fi;
+        echo "original" | /opt/rocks/bin/ci /etc/rc.d/rocksconfig.d/post-90-condor-server;
+        /opt/rocks/bin/co -f -l /etc/rc.d/rocksconfig.d/post-90-condor-server;
+fi
+cat > /etc/rc.d/rocksconfig.d/post-90-condor-server << 'EOF'
+#!/bin/sh
+
+LOCAL_DIR=/var/opt/condor
+rm -rf \$LOCAL_DIR
+mkdir -p \$LOCAL_DIR
+mkdir \$LOCAL_DIR/log
+mkdir \$LOCAL_DIR/spool
+mkdir \$LOCAL_DIR/cred_dir
+mkdir \$LOCAL_DIR/execute
+
+chown -R condor.condor \$LOCAL_DIR
+chmod a+rx  \$LOCAL_DIR
+
+/opt/rocks/bin/rocks sync users > /dev/null 2>&1
+
+if [ -f /etc/profile.d/java.sh ]; then
+   . /etc/profile.d/java.sh
+fi
+
+. /etc/profile.d/rocks-condor.sh
+/opt/rocks/bin/rocks report host condor config localhost | /opt/rocks/bin/rocks report script | /bin/sh
+
+condorLocal=/opt/condor/etc/condor_config.local
+echo "HOSTALLOW_WRITE = $NEW_NAME,*.$DNS_DOMAIN_0,`echo $SUBNET_0 | sed 's/\.*.$/\.\*/'`" >> \$condorLocal
+echo "PRIVATE_NETWORK_NAME = $DNS_DOMAIN_0" >> \$condorLocal
+echo "TCP_FORWARDING_HOST = $IP_1" >> \$condorLocal
+echo "PRIVATE_NETWORK_INTERFACE = $IP_0" >> \$condorLocal
+echo "NETWORK_INTERFACE = $IP_0" >> \$condorLocal
+
+EOF
+chmod 0755 /etc/rc.d/rocksconfig.d/post-90-condor-server
+
+ROCKS-KS-POST
+/bin/chmod +x /tmp/do-condor-server.sh
+
+}
+
+RewriteOpal() {
+echo "Running RewriteOpal" >> $LOG
+cat > /tmp/do-opal.sh << ROCKS-KS-POST
+#!/bin/bash
+
+chown -R tomcat.tomcat /state/partition1/opal
+chown -R tomcat.tomcat /state/partition1/home/tomcat
+
+mkpasswd -l 10 -s 0 > /opt/opal/etc/opal.pass 2> /dev/null
+
+OPAL_DB_PASS=\`cat /opt/opal/etc/opal.pass\`
+/bin/echo -en GRANT ALL PRIVILEGES ON opaldb.* TO 'opal'@'localhost' IDENTIFIED BY \'\$OPAL_DB_PASS\' \; | /usr/bin/mysql
+
+cp /opt/opal/etc/hibernate-opal.cfg.xml.mysql /opt/opal/etc/hibernate-opal.cfg.xml
+sed -i "s/opal_mysql_passwd/\$OPAL_DB_PASS/" /opt/opal/etc/hibernate-opal.cfg.xml
+chmod go-r /opt/opal/etc/hibernate-opal.cfg.xml
+
+cat >> /etc/httpd/conf.d/rocks.conf << 'EOF'
+
+JkMount /opal* worker1
+JkMount /app* worker1
+
+EOF
+
+sed -i 's/AddHandler imap-file map/#AddHandler imap-file map/g' /etc/httpd/conf/httpd.conf
+sed -i 's/AddHandler type-map var/#AddHandler type-map var/g' /etc/httpd/conf/httpd.conf
+
+cp -p -r /state/partition1/opal/ /mnt
+sed -i 's/opal/#opal/' /etc/auto.share
+
+cat >> /etc/auto.share << 'EOF'
+opal $NEW_NAME:/mnt/&
+EOF
+
+service autofs reload
+
+proc_count=`rocks list host compute |  awk '{s+=$3}END{print s}'`
+if [ "\$proc_count" == "" ] ; then
+    proc_count=`cat /proc/cpuinfo | grep "processor" | wc -l`
+fi 
+
+change_list='/opt/tomcat/webapps/opal2/WEB-INF/classes/opal.properties /opt/opal/etc/opal.properties'
+for i in \$change_list; do 
+    sed -i "s/$OLD_NAME.$OLD_DNSDomain/$FQDN/g" \$i
+    sed -i "s/num.procs=.*/num.procs=\$proc_count/" \$i
+    #sed -i "s/DRMAAJobManager/ForkJobManager/" /opt/opal/etc/opal.properties
+done
+
+#cd /opt/opal
+#export JAVA_HOME=/usr/java/latest
+#export PATH=\$JAVA_HOME/bin:\$PATH
+#/bin/su tomcat -c "/opt/rocks/bin/ant install > /opt/opal/install.log" 2>&1 
+
+change_list=\`grep -r -l $OLD_NAME /var/www/html/roll-documentation/opal\`
+
+for i in \$change_list; do 
+  sed -i "s/$OLD_NAME.$OLD_DNSDomain/$NEW_NAME_1.$DNS_DOMAIN_1/g" \$i; 
+done
+
+
+ROCKS-KS-POST
+/bin/chmod +x /tmp/do-opal.sh
+
+}
+
+RewritePdb2pqr() {
+echo "Running RewritePdb2pqr" >> $LOG
+cat > /tmp/do-pdb2pqr-server.sh << ROCKS-KS-POST
+#!/bin/bash
+
+change_list=\`grep -r -l $OLD_NAME /opt/pdb2pqr\`
+
+for i in \$change_list; do 
+  sed -i "s/$OLD_NAME.$OLD_DNSDomain/$NEW_NAME_1.$DNS_DOMAIN_1/g" \$i; 
+done
+
+ROCKS-KS-POST
+
+/bin/chmod +x /tmp/do-pdb2pqr-server.sh
+}
+
+RewriteAutodock() {
+echo "Running RewriteAutodock" >> $LOG
+cat > /tmp/do-autodock-server.sh << ROCKS-KS-POST
+#!/bin/bash
+
+/opt/mgltools/bin/renameOpalService.sh $NEW_NAME &> /tmp/renameOpalService.log 
+
+ROCKS-KS-POST
+/bin/chmod +x /tmp/do-autodock-server.sh
+}
+
+### functions to find the new values
+FindOrigVals () {
+    echo "Running FindOrigVals" >> $LOG 2>&1
+    OLD_NAME=`rocks list host attr frontend | grep hostname | awk '{print $3}'`
+    OLD_IP=`rocks list host attr frontend | grep Kickstart_PublicAddress | awk '{print $3}'`
+    OLD_DNSDomain=`rocks list host attr frontend | grep Kickstart_PublicDNSDomain | awk '{print $3}'`
+    echo "OLD_NAME $OLD_NAME"
+    echo "OLD_IP $OLD_IP"
+    echo "OLD_DNSDomain $OLD_DNSDomain"
+}
+
+FindNewName () {
+    echo "Running FindNewName" >> $LOG 2>&1
+    NEW_NAME=`grep HOSTNAME /etc/sysconfig/network| grep -v "#" | /bin/cut -d'=' -f2 | /bin/cut -d'.' -f1 `
+    echo "NEW_NAME $NEW_NAME"
+}
+
+FindNewNameEC2 () {
+    if [ "$NEW_NAME" == "" ] ; then 
+        NEW_NAME=`hostname`
+    fi
+    echo "NEW_NAME $NEW_NAME"
+}
+
+FindGateway () {
+    echo "Running FindGateway" >> $LOG 2>&1
+    GATEWAY_1=`cat /etc/sysconfig/network | grep -v "#" |  grep GATEWAY | awk -F "=" '{print $2}'`
+    echo "GATEWAY_1 $GATEWAY_1"
+}
+
+FindGatewayEC2 () {
+    echo "Running FindGateway" >> $LOG 2>&1
+    GATEWAY_1=`netstat -rn| grep "^0.0.0.0" | awk '{print $2}'`
+    echo "GATEWAY_1 $GATEWAY_1"
+}
+
+FindDNS () {
+    # need to run after FindInterfaceVals
+    echo "Running FindDNS" >> $LOG 2>&1
+    DNS_SERVER_1=`cat /etc/resolv.conf | grep nameserver  | grep -v "127\.0\.0\.1" | awk '{print $2}'`
+    DNS_DOMAIN_1=`cat /etc/resolv.conf | grep search  | awk '{print $3}'`
+    FQDN=$NEW_NAME.$DNS_DOMAIN_1
+    NEW_NAME_1=$NEW_NAME
+    echo "DNS_SERVER_1 $DNS_SERVER_1"
+    echo "DNS_DOMAIN_1 $DNS_DOMAIN_1"
+}
+
+FindDNSEC2 () {
+    # need to run after FindInterfaceVals
+    echo "Running FindDNS" >> $LOG 2>&1
+    DNS_SERVER_1=`cat /etc/resolv.conf | grep nameserver  | grep -v "127\.0\.0\.1" | awk '{print $2}'`
+    FQDN=`host $IP_1 | awk '{print $5}' | sed 's/.$//'`
+    NEW_NAME_1=`echo $FQDN | sed 's/\./ /' | awk '{print $1}'`
+    DNS_DOMAIN_1=`echo $FQDN | sed 's/\./ /' | awk '{print $2}'`
+
+    echo "DNS_SERVER_1 $DNS_SERVER_1"
+    echo "DNS_DOMAIN_1 $DNS_DOMAIN_1"
+    echo "FQDN $FQDN"
+}
+
+
+FindInterfaceVals () {
+    echo "Running FindInterface $1" >> $LOG 2>&1
+    # takes interface name as an argument
+    VALS=/tmp/vals-$1
+
+    # find mac and CIDR
+    ip -o addr show $1 > $VALS
+    hwaddr=`cat $VALS | grep BROAD | awk '{print $11}'`
+    ip=`cat $VALS | grep -v BROAD | awk '{print $4}' | awk -F "/" '{print $1}'`
+    cidr=`cat $VALS | grep -v BROAD | awk '{print $4}' | awk -F "/" '{print $2}'`
+
+    # find broadcast and netmask
+    ifconfig $1 > $VALS
+    broadcast=`cat $VALS | grep Mask | awk '{print $3}' | awk -F ":" '{print $2}'`
+    netmask=`cat $VALS | grep Mask | awk '{print $4}' | awk -F ":" '{print $2}'`
+
+    # find subnet
+    SaveIFS=$IFS
+    IFS=.
+    typeset -a IPArray=($ip)
+    typeset -a NetmaskArray=($netmask)
+    IFS=$SaveIFS
+
+    typeset -i ipoct1=${IPArray[0]}
+    typeset -i ipoct2=${IPArray[1]}
+    typeset -i ipoct3=${IPArray[2]}
+    typeset -i ipoct4=${IPArray[3]}
+
+    typeset -i nmoct1=${NetmaskArray[0]}
+    typeset -i nmoct2=${NetmaskArray[1]}
+    typeset -i nmoct3=${NetmaskArray[2]}
+    typeset -i nmoct4=${NetmaskArray[3]}
+
+    subnet="$((ipoct1 & nmoct1)).$((ipoct2 & nmoct2)).$((ipoct3 & nmoct3)).$((ipoct4 & nmoct4))"
+    all=($hwaddr $ip $cidr $broadcast $netmask $subnet)
+}
+
+FindInterfaceValsEC2 () {
+    echo "Running FindInterface $1" >> $LOG 2>&1
+
+    # find mac and CIDR
+    hwaddr="`ifconfig $1 | grep HWaddr | awk '{print tolower($5)}'`"
+    primaryNIC="`ifconfig eth0 | grep HWaddr | awk '{print tolower($5)}'`"
+    ip=`curl -sf http://169.254.169.254/latest/meta-data/network/interfaces/macs/$primaryNIC/public-ipv4s/`
+    cidr='24'
+    broadcast=`echo $ip | awk -F "." '{printf("%d.%d.%d.255", $1,$2,$3)}'`
+    netmask='255.255.255.0'
+
+    # find subnet
+    SaveIFS=$IFS
+    IFS=.
+    typeset -a IPArray=($ip)
+    typeset -a NetmaskArray=($netmask)
+    IFS=$SaveIFS
+
+    typeset -i ipoct1=${IPArray[0]}
+    typeset -i ipoct2=${IPArray[1]}
+    typeset -i ipoct3=${IPArray[2]}
+    typeset -i ipoct4=${IPArray[3]}
+
+    typeset -i nmoct1=${NetmaskArray[0]}
+    typeset -i nmoct2=${NetmaskArray[1]}
+    typeset -i nmoct3=${NetmaskArray[2]}
+    typeset -i nmoct4=${NetmaskArray[3]}
+
+    subnet="$((ipoct1 & nmoct1)).$((ipoct2 & nmoct2)).$((ipoct3 & nmoct3)).$((ipoct4 & nmoct4))"
+    all=($hwaddr $ip $cidr $broadcast $netmask $subnet)
+}
+
+
+FindValues () {
+
+    if [ -f /etc/resolv.conf.predhclient ] ; then
+        mv  /etc/resolv.conf.predhclient $SAVE
+    fi
+
+    # find old host values (name, ip, dns) 
+    # find new host values (name, ip, dns, gw, networking info) 
+    FindOrigVals
+    FindNewName$EC2
+    FindGateway$EC2
+
+    FindInterfaceVals eth0
+    HWADDR_0=${all[0]}
+    IP_0=${all[1]}
+    CIDR_0=${all[2]}
+    BROADCAST_0=${all[3]}
+    NETMASK_0=${all[4]}
+    SUBNET_0=${all[5]}
+    GATEWAY_0=$IP_0
+    DNS_DOMAIN_0=local
+    echo "eth0: " ${all[@]}
+
+    FindInterfaceVals$EC2 eth1
+    HWADDR_1=${all[0]}
+    IP_1=${all[1]}
+    CIDR_1=${all[2]}
+    BROADCAST_1=${all[3]}
+    NETMASK_1=${all[4]}
+    SUBNET_1=${all[5]}
+    echo "eth1: " ${all[@]}
+
+    FindDNS$EC2
+
+}
+
+CreateInfoFile () {
+    echo "Running CreateInfoFile " >> $LOG 2>&1
+    # find values, keep names consistent with VMcompute file
+    eth0info=`rocks list host interface localhost | grep eth0`
+    FE_IP0=`echo $eth0info | awk '{print $4}'`
+    FE_NAME_0=`echo $eth0info | awk '{print $7}'`
+
+    eth1info=`rocks list host interface localhost | grep eth1`
+    FE_IP1=`echo $eth1info | awk '{print $4}'`
+    FE_NAME_1=`echo $eth1info | awk '{print $7}'`
+
+    NAMESERVER=`rocks list host attr localhost | grep Kickstart_PublicDNSServers | awk '{print $3}'`
+    DNS_DOMAIN_0=`rocks list host attr localhost | grep Kickstart_PrivateDNSDomain | awk '{print $3}'`
+    DNS_DOMAIN_1=`rocks list host attr localhost | grep Kickstart_PublicDNSDomain | awk '{print $3}'`
+
+    # create file with values
+    FILE=/root/utils/frontend-info
+    if [ -f $FILE ] ; then
+        rm -rf $FILE
+    fi
+
+    touch $FILE
+
+    echo "FE_IP0=$FE_IP0" >> $FILE
+    echo "FE_NAME_0=$FE_NAME_0" >> $FILE
+    echo "FE_IP1=$FE_IP1" >> $FILE
+    echo "FE_NAME_1=$FE_NAME_1" >> $FILE
+    echo "NAMESERVER=$NAMESERVER" >> $FILE
+    echo "DNS_DOMAIN_0=$DNS_DOMAIN_0" >> $FILE
+    echo "DNS_DOMAIN_1=$DNS_DOMAIN_1" >> $FILE
+    
+    cp -p $FILE /var/www/html
+}
+
+UpdateExport () {
+    echo "Running UpdateExport" >> $LOG
+    x=`df -h | grep mnt`
+    if [ "$x" == "" ] ; then
+       echo "WARNING: no /mnt partition available."
+    else
+        cat /etc/exports | sed 's%/export%/mnt%' > /tmp/add-exports
+        cat /tmp/add-exports >> /etc/exports
+        /usr/sbin/exportfs -a
+    fi
+}
+
+#######  MAIN  ###########
+CheckIfEC2 
+SetDefaults
+
+StartLog
+
+FindValues
+SaveOrigDB
+PrepOpal
+PrepCondor
+PrepSGE
+
+UpdateDB 
+CreatePosts
+RunPosts
+CreateInfoFile
+UpdateExport
+
+EndLog

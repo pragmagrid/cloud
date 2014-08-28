@@ -1,0 +1,33 @@
+<?xml version="1.0" standalone="no"?>
+
+<kickstart roll="sge" interface="public">
+
+	<description>
+
+	Sun Grid Engine support
+
+	</description>
+
+<changelog><![CDATA[
+        Based on 
+	$Log: sge-base.xml,v $
+	Revision 1.18  2012/10/11 02:50:22  clem
+]]></changelog>
+
+<post>
+
+sgeconf=/opt/gridengine/util/install_modules/sge_configuration.conf
+
+if [ -d /tmp/reconfig/orig ]; then
+    cp -p $sgeconf /tmp/reconfig/orig/
+    cat $sgeconf | grep -v SGE_CLISTER_NAME > /tmp/sge_configuration.conf
+    cat /tmp/sge_configuration.conf > $sgeconf
+fi
+
+<file name="/opt/gridengine/util/install_modules/sge_configuration.conf" mode="append">
+SGE_CLUSTER_NAME="&Kickstart_PrivateHostname;"
+</file>
+
+</post>
+
+</kickstart> 

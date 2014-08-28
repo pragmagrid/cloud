@@ -1,0 +1,172 @@
+<?xml version="1.0" standalone="no"?>
+
+<kickstart roll="opal">
+
+        <description>
+        Opal (Java)
+        Automatic Web service wrappers for scientific applications on Grid resources.
+
+        Run on every node which is going to be an opal-server appliance
+        </description>
+
+        <copyright>
+        Copyright (c) 2000 - 2008 The Regents of the University of California.
+        All rights reserved.
+        </copyright>
+
+<changelog><![CDATA[
+]]></changelog>
+
+<post os="linux" arch="x86_64">
+LOGFILE=/tmp/opal-install.log
+
+<file name="/opt/opal/etc/opal.pass" perms="0600">
+<eval>
+mkpasswd -l 10 -s 0 2> /dev/null
+</eval>
+</file>
+
+OPAL_DB_PASS=`cat /opt/opal/etc/opal.pass`
+/bin/echo -en GRANT ALL PRIVILEGES ON opaldb.* TO 'opal'@'localhost' IDENTIFIED BY \'$OPAL_DB_PASS\' \; | /usr/bin/mysql
+
+if [ -d /tmp/reconfig/orig ]; then
+    cp /opt/opal/etc/hibernate-opal.cfg.xml /tmp/reconfig/orig
+fi
+
+if [ ! -f /opt/opal/etc/hibernate-opal.cfg.xml.hsql]; then 
+    cp /opt/opal/etc/hibernate-opal.cfg.xml /opt/opal/etc/hibernate-opal.cfg.xml.hsql
+ifi
+
+cp /opt/opal/etc/hibernate-opal.cfg.xml.mysql /opt/opal/etc/hibernate-opal.cfg.xml
+sed -i "s/opal_mysql_passwd/$OPAL_DB_PASS/" /opt/opal/etc/hibernate-opal.cfg.xml
+chmod go-r /opt/opal/etc/hibernate-opal.cfg.xml
+/bin/echo "DB setup complited" &gt;&gt; $LOGFILE
+
+<file name="/etc/httpd/conf.d/rocks.conf" mode="append">
+
+JkMount /opal* worker1
+JkMount /app* worker1
+
+</file>
+sed -i 's/AddHandler imap-file map/#AddHandler imap-file map/g' /etc/httpd/conf/httpd.conf
+sed -i 's/AddHandler type-map var/#AddHandler type-map var/g' /etc/httpd/conf/httpd.conf
+
+<!-- restart httpd -->
+/etc/init.d/httpd restart
+
+CATALINA_HOME=/opt/tomcat
+BASE="export"
+if [ -f /tmp/reconfig/ec2]; then
+    ec2=`cat /tmp/reconfig/ec2`
+    if  $ec2; then
+        BASE="mnt" # EC2 true
+    fi
+fi
+
+
+if [ -e $CATALINA_HOME/webapps/opal-jobs ]; then
+    rm -rf $CATALINA_HOME/webapps/opal-jobs
+fi
+
+ls /$BASE/opal/opal-jobs > /dev/null
+ln -s /$BASE/opal/opal-jobs  $CATALINA_HOME/webapps/opal-jobs
+/bin/cp /opt/opal/etc/index.html $CATALINA_HOME/webapps/opal-jobs
+fi
+
+/bin/echo "Tomcat setup completed sucessfully " &gt;&gt; $LOGFILE
+
+<!-- update opal.properties file -->
+if [ -d /tmp/reconfig/orig]; then
+    cp /opt/opal/etc/opal.properties /opt/opal/etc/opal.properties.orig
+fi
+
+SERVER_NAME="&opal_public_fqdn;"
+if [ "$SERVER_NAME" == "" ] ; then
+    #if this is a frontend installation the
+    #opal_public_fqdn is not set yet
+    SERVER_NAME="&Kickstart_PublicHostname;"
+fi
+
+proc_count=`/opt/rocks/bin/rocks list host compute |  awk '{s+=$3}END{print s}'`
+if [ "\$proc_count" == "" ] ; then
+    proc_count=`cat /proc/cpuinfo | grep "processor" | wc -l`
+fi
+
+<file name="/opt/opal/etc/opal.properties" perm="0644" vars="expanded">
+tomcat.url=http://$SERVER_NAME
+num.procs=$proc_count
+mpi.run=/opt/openmpi/bin/mpirun
+working.dir=opal-jobs
+mail.enable=true
+mail.smtp.host=localhost
+mail.smtp.from=noreply@$SERVER_NAME
+mail.smtp.auth=false
+mail.smtp.debug=false
+mail.smtp.user=useless
+mail.smtp.password=useless
+opal.datalifetime=4 days
+opal.hard_limit=3600
+opal.jobmanager=edu.sdsc.nbcr.opal.manager.DRMAAJobManager
+drmaa.pe=mpich
+drmaa.queue=all.q
+globus.gatekeeper=host:2119/jobmanager-sge
+globus.service_cert=/path/to/your/globus/cert
+globus.service_privkey=/path/to/your/globus/key
+globus.gridftp_base=gsiftp://host:2811/working_dir
+csf4.workingDir=opal_runs
+mpi.script=/opt/condor/etc/examples/mp1script
+opal.ip.processing=true
+opal.ip.limit=35
+opal.ip.blacklist=66.102.7.104
+opal.ip.whitelist=66.102.7.105, 127.0.0.1
+</file>
+
+<file name="/etc/rc.d/rocksconfig.d/post-99-opaldeploy" perms="0700">
+#!/bin/bash
+#
+
+#sync the users
+while [ true ]; do
+        #if tomcat is defined get out of the loop
+        id tomcat &amp;&amp; break
+        /opt/rocks/bin/411get --all
+        sleep 4
+done
+
+INSTALLLOG=/opt/opal/install.log
+
+echo "running install opal " &gt; $INSTALLLOG
+
+chown -R tomcat:tomcat /opt/opal
+chown -R tomcat:tomcat /opt/tomcat
+chown -R tomcat:tomcat /opt/tomcat-*
+#it should not be running, but just in case...
+/etc/init.d/tomcat-opal stop
+
+cd /opt/opal
+export JAVA_HOME=/usr/java/latest
+export PATH=$JAVA_HOME/bin:$PATH
+CATALINA_HOME=/opt/tomcat
+
+/bin/su tomcat -c "/opt/rocks/bin/ant install" &gt;&gt; $INSTALLLOG 2&gt;&amp;1
+<!-- Enable directory listing for job output -->
+FILE=$CATALINA_HOME/conf/web.xml
+pre=`cat -n $FILE  | grep listings | grep param-name | awk '{print $1}'`
+num=`expr $pre + 1`
+sed -i "${num} s/false/true/" $FILE
+
+#wait tomcat to deploy opal
+/etc/init.d/tomcat-opal start
+sleep 20
+
+#Deploy possible installed applications
+/bin/su tomcat -c "/opt/opal/deployed/deploy.sh" &gt;&gt;  $INSTALLLOG  2&gt;&amp;1
+
+rm -rf /etc/rc.d/rocksconfig.d/post-99-opaldeploy
+</file>
+
+echo "Opal setup completed sucesfully" &gt;&gt; $LOGFILE
+
+</post>
+</kickstart>
+

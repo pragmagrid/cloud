@@ -1,0 +1,41 @@
+<?xml version="1.0" standalone="no"?>
+
+<kickstart roll="base">
+
+  <description>
+
+  NFS Servers for /export
+
+  </description>
+
+<changelog><![CDATA[
+Based on nfs-server.xml Revision 1.4  
+]]></changelog>
+
+<post>
+
+
+/sbin/chkconfig nfs on
+/bin/mkdir -p /export/home
+
+
+<file name="/etc/exports">
+/export &Kickstart_PrivateAddress;(rw,async,no_root_squash) &Kickstart_PrivateNetwork;/&Kickstart_PrivateNetmask;(rw,async)
+</file>
+
+<!-- check if we are in EC2 -->
+if [ -f /tmp/reconfig/ec2]; then
+    ec2=`cat /tmp/reconfig/ec2`
+    if $ec2; then
+<file name="/etc/exports" mode="append">
+/mnt &Kickstart_PrivateAddress;(rw,async,no_root_squash) &Kickstart_PrivateNetwork;/&Kickstart_PrivateNetmask;(rw,async)
+</file>
+    fi
+fi
+
+/usr/sbin/exportfs -a
+
+</post>
+
+</kickstart> 
+

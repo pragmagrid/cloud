@@ -1,0 +1,67 @@
+<?xml version="1.0" standalone="no"?>
+
+<kickstart roll="sge" interface="public">
+
+	<description>
+	Sun Grid Engine master server configuration. 
+	</description>
+
+<changelog><![CDATA[
+        Based on 
+	Revision 1.53  2012/10/26 18:28:15  
+]]></changelog>
+
+<post>
+
+<file name="/etc/rc.d/rocksconfig.d/post-01-sge-qmaster" perms="0755">
+#!/bin/bash -x
+
+. /etc/profile.d/sge-binaries.sh
+
+# sets the ownership to sge user
+chown -R 400.400 $SGE_ROOT
+
+# Setup QMaster
+cd $SGE_ROOT &amp;&amp; \
+	./inst_sge -m -auto ./util/install_modules/sge_configuration.conf
+
+/etc/rc.d/init.d/sgemaster.`hostname -s` stop
+
+echo "&Kickstart_PrivateHostname;.&Kickstart_PrivateDNSDomain; \
+&Kickstart_PublicHostname; &Kickstart_PrivateHostname;" > \
+	$SGE_ROOT/$SGE_CELL/common/host_aliases
+
+cat default/common/configuration | sed -e "s/reporting=false/reporting=true/g" -e "s/joblog=false/joblog=true/g" &gt; /tmp/sge-default-common-config.conf
+mv -f /tmp/sge-default-common-config.conf default/common/configuration
+chown 400:400 default/common/configuration
+
+/etc/rc.d/init.d/sgemaster.`hostname -s` start
+
+# add default MPI parallel environments
+$SGE_ROOT/bin/$SGE_ARCH/qconf -Ap $SGE_ROOT/mpi/rocks-mpich.template \
+	&gt;&gt; /dev/null 2&gt;&amp;1
+$SGE_ROOT/bin/$SGE_ARCH/qconf -Ap $SGE_ROOT/mpi/rocks-mpi.template \
+	&gt;&gt; /dev/null 2&gt;&amp;1
+$SGE_ROOT/bin/$SGE_ARCH/qconf -Ap $SGE_ROOT/mpi/rocks-ompi.template \
+	&gt;&gt; /dev/null 2&gt;&amp;1
+
+# add this node as a submit host
+$SGE_ROOT/bin/$SGE_ARCH/qconf -as `/bin/hostname --fqdn` \
+	&gt;&gt; /dev/null 2&gt;&amp;1
+
+# add mpich mpi openmpi to all.q pe list
+$SGE_ROOT/bin/$SGE_ARCH/qconf -rattr queue pe_list 'make mpich mpi orte' all.q \
+	&gt;&gt; /dev/null 2&gt;&amp;1
+
+#
+# call 'rocks sync config' to ensure all the sge clients are properly set up
+# (in case the restore roll was supplied
+#
+/opt/rocks/bin/rocks sync config
+
+rm /etc/rc.d/rocksconfig.d/post-01-sge-qmaster
+</file>
+
+</post>
+
+</kickstart> 

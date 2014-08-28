@@ -1,0 +1,41 @@
+<?xml version="1.0" standalone="no"?>
+
+<kickstart roll="opal">
+
+        <description>
+        Opal (Java)
+        To be used with EC2
+        </description>
+
+        <copyright>
+        Copyright (c) 2000 - 2008 The Regents of the University of California.
+        All rights reserved.
+        </copyright>
+
+<changelog><![CDATA[
+]]></changelog>
+
+
+<post os="linux" arch="x86_64">
+
+echo `curl http://169.254.169.254/latest/meta-data/local-ipv4`  `curl http://169.254.169.254/latest/meta-data/hostname` >> /etc/hosts
+
+<file name="/var/www/html/index.html" perms="0644">
+<![CDATA[
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<html>
+<head>
+<title>Your Page Title</title>
+<meta http-equiv="REFRESH" content="0;url=/opal2/dashboard"></HEAD>
+<BODY>
+Redirecting to...
+</BODY>
+</HTML>
+]]>
+</file>
+
+
+</post>
+</kickstart>
+
+

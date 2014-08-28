@@ -1,0 +1,40 @@
+<?xml version="1.0" standalone="no"?>
+
+<kickstart roll="pdb2pqr">
+
+        <description>
+                PDB2PQR
+                        </description>
+
+        <copyright>
+                </copyright>
+
+<changelog><![CDATA[
+
+]]></changelog>
+
+
+<post>
+
+tempname="rollhost"
+
+if [ -f /tmp/reconfig/orig/fqdn ]; then
+    tempname=`cat /tmp/reconfig/orig/fqdn`
+fi
+
+realname=&Kickstart_PublicHostname;
+
+change_list2=`grep -r -l $tempname /var/www/html/roll-documentation/pdb2pqr`
+for i in $change_list2; do 
+  sed -i "s/$tempname/$realname/g" $i; 
+done
+
+change_list2=`grep -r -l $tempname /opt/pdb2pqr_*`
+for i in $change_list2; do 
+  sed -i "s/$tempname/$realname/g" $i; 
+done
+
+
+</post>
+</kickstart>
+

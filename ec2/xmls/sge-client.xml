@@ -1,0 +1,125 @@
+<?xml version="1.0" standalone="no"?>
+
+<kickstart roll="sge" interface="public">
+
+	<description>
+
+	Sun Grid Engine execd daemon configuration. 
+
+	</description>
+
+<changelog><![CDATA[
+        Based on 
+	$Log: sge-client.xml,v $
+	Revision 1.21  2010/03/25 00:31:13  bruno
+]]></changelog>
+
+<post>
+
+<!--
+	copy the qmaster configuration files from the frontend to the 
+	execution hosts on the compute nodes
+-->
+
+mkdir -p /opt/gridengine/default/spool
+mkdir -p /opt/gridengine/default/common
+
+if [ -d /tmp/reconfig/scripts/compute/sge ]; then
+   /bin/cp -p /tmp/reconfig/scripts/compute/sge/* /opt/gridengine/default/common
+fi
+
+
+<file name="/opt/gridengine/default/common/act_qmaster" perms="0444">
+<eval>
+cat /opt/gridengine/default/common/act_qmaster
+</eval>
+</file>
+
+<file name="/opt/gridengine/default/common/configuration" perms="0444">
+<eval>
+cat /opt/gridengine/default/common/configuration
+</eval>
+</file>
+
+<file name="/opt/gridengine/default/common/settings.sh" perms="0444">
+<eval>
+cat /opt/gridengine/default/common/settings.sh
+</eval>
+</file>
+
+<file name="/opt/gridengine/default/common/settings.csh" perms="0444">
+<eval>
+cat /opt/gridengine/default/common/settings.csh
+</eval>
+</file>
+
+<file name="/opt/gridengine/default/common/bootstrap" perms="0444">
+<eval>
+cat /opt/gridengine/default/common/bootstrap
+</eval>
+</file>
+
+<file name="/opt/gridengine/default/common/cluster_name" perms="0444">
+<eval>
+cat /opt/gridengine/default/common/cluster_name
+</eval>
+</file>
+
+<file name="/opt/gridengine/default/common/sgeexecd" perms="0755">
+<eval>
+cat /opt/gridengine/default/common/sgeexecd | \
+ sed -e "s%svc:/application/sge/\$name\:\$SGE_CLUSTER_NAME%svc:/network/sge/\$name\:default%g"
+</eval>
+</file>
+
+</post>
+
+
+<post>
+
+<eval mode="xml">
+/opt/rocks/bin/rocks report host sge config &hostname;
+</eval>
+
+</post>
+
+
+<post os="linux">
+<file name="/etc/rc.d/rocksconfig.d/post-91-sge">
+#!/bin/bash
+</file>
+</post>
+
+<post os="linux" cond="exec_host">
+<file name="/etc/rc.d/rocksconfig.d/post-91-sge" mode="append">
+SET_HOST_TYPE=" -x "
+</file>
+</post>
+
+<post os="linux" cond="submit_host">
+<file name="/etc/rc.d/rocksconfig.d/post-91-sge" mode="append">
+SET_HOST_TYPE+=" -s "
+</file>
+</post>
+
+<post os="linux">
+<file name="/etc/rc.d/rocksconfig.d/post-91-sge" mode="append" perms="0755">
+export SET_HOST_TYPE
+
+export SGE_ROOT=/opt/gridengine
+
+mkdir -p $SGE_ROOT/default/spool/qmaster
+
+# sets the ownership to sge user
+chown -R 400.400 $SGE_ROOT
+
+# sets up the execution node 
+cd $SGE_ROOT &amp;&amp; \
+	./inst_sge -noremote $SET_HOST_TYPE -auto \
+	./util/install_modules/sge_host_config.conf &gt; /dev/null 2&gt;&amp;1
+
+rm /etc/rc.d/rocksconfig.d/post-91-sge
+</file>
+</post>
+
+</kickstart>

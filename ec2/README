@@ -1,0 +1,10 @@
+Work in progress
+
+**rocks-reconfig** -  to reconfigure rocks cluster running in EC2 VPC
+
+1. can be run for frontend without any arguments. 
+
+2. can be run for a compute node with arguments: frontend=1.2.3.4 
+   where 1.2.3.4 is frontend IP.
+
+

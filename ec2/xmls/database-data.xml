@@ -1,0 +1,103 @@
+<?xml version="1.0" standalone="no"?>
+
+<kickstart roll="base" interface="public">
+
+  <description>
+  Populate cluster database with initial data
+  </description>
+
+        <copyright>
+        Copyright (c) 2000 - 2012 The Regents of the University of California.
+        All rights reserved. Rocks(r) v5.5/v6.0 www.rocksclusters.org
+        </copyright>
+
+<changelog><![CDATA[
+  Based on 
+  Revision 1.76  2012/05/06 05:48:10  phil
+]]></changelog>
+
+<post interpreter="/opt/rocks/bin/python">
+import os.path
+if os.path.exists('/tmp/reconfig/attrs.txt'):
+        private = ''
+        public = ''
+        macs = {}
+        file = open('/tmp/reconfig/attrs.txt', 'r')
+        for line in file.readlines():
+                l = line.split(':', 1)
+                if len(l) == 2:
+                        # key/value pairs
+                        #
+                        # there are some attributes that don't belong in the
+                        # database
+                        #
+                        key = l[0].strip()
+
+                        if key in [ 'hostname', 'rack', 'rank', 'os' ]:
+                                continue
+                        v = l[1].strip()
+                        value = ''
+                        for i in v:
+                                if i == "'":
+                                        value += "'"
+                                        value += '"'
+                                        value += "\\'"
+                                        value += '"'
+                                        value += "'"
+                                else:
+                                        value += i
+
+                        os.system("/opt/rocks/bin/rocks set attr '%s' '%s'"
+                                % (key, value))
+                        if key == 'Kickstart_PrivateInterface':
+                            private = value
+                        if key == 'Kickstart_PublicInterface':
+                            public = value
+                        if key == private:
+                            macs[private] = value
+                        if key == public:
+                            macs[public] = value
+        file.close()
+
+        # set new mac address
+        for key in macs.keys()
+            os.system("/opt/rocks/bin/rocks set host interface mac frontend %s %s" % key; macs[key])
+</post>
+
+<post>
+<!-- networks -->
+/opt/rocks/bin/rocks set network subnet private	&Kickstart_PrivateNetwork;
+/opt/rocks/bin/rocks set network netmask private &Kickstart_PrivateNetmask;
+/opt/rocks/bin/rocks set network dnszone private &Kickstart_PrivateDNSDomain;
+/opt/rocks/bin/rocks set network servedns private true
+
+/opt/rocks/bin/rocks set network subnet public &Kickstart_PublicNetwork;
+/opt/rocks/bin/rocks add network netmask public &Kickstart_PublicNetmask;
+/opt/rocks/bin/rocks add network dnszone public &Kickstart_PublicDNSDomain;
+/opt/rocks/bin/rocks add network servedns subnet false
+
+</post>
+
+<post os='linux'>	
+<!-- routes
+	default gateway (frontend)
+	default gateway (backend nodes)
+	frontend public interface over private network
+-->
+
+/opt/rocks/bin/rocks add host route &Kickstart_PrivateHostname; 0.0.0.0  &Kickstart_PublicGateway; netmask=0.0.0.0
+/opt/rocks/bin/rocks add route 0.0.0.0  &Kickstart_PrivateGateway; netmask=0.0.0.0
+/opt/rocks/bin/rocks add route &Kickstart_PublicAddress; &Kickstart_PrivateAddress; netmask=255.255.255.255
+	
+<!-- assign private network info to private -->
+/opt/rocks/bin/rocks set host interface subnet frontend &Kickstart_PrivateInterface; private
+/opt/rocks/bin/rocks set host interface ip frontend &Kickstart_PrivateInterface; &Kickstart_PrivateAddress;
+/opt/rocks/bin/rocks set host interface name frontend &Kickstart_PrivateInterface; &Kickstart_PrivateHostname;
+
+<!-- assign public network info to public -->
+/opt/rocks/bin/rocks set host interface subnet frontend &Kickstart_PublicInterface; public
+/opt/rocks/bin/rocks set host interface ip frontend &Kickstart_PublicInterface; &Kickstart_PublicAddress;
+/opt/rocks/bin/rocks set host interface name frontend &Kickstart_PublicInterface; &Kickstart_PrivateHostname;
+</post>
+
+</kickstart>

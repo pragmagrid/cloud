@@ -1,0 +1,17 @@
+These scripts are for refenrence only.  Some are rewritten or obsoleted
+by other rolls, some are in a process of being rewritten.
+
+
+1. Prototype script to change FQDN of FE  (done for pragma 22, Bioapp VM)
+
+   + VMreconfig 
+
+2. Run rocks virtual cluster in VPC on EC2 
+
+   + do-export.sh - script to run on a virtual frontend image to copy needed rokcs xml files from /export
+     Run before shutting down FE so that there is only 1 partition / and it is 10Gb.
+
+   + VMfrontend - run on a frontend EC2 instance
+   + addCompute - run on frontend EC2 instance when need to add compute nodes
+   + VMcompute -  run on a compute node EC2 instance. Called from frontend's run
+     of addCompute via "rocks run host X VMcompute " command 

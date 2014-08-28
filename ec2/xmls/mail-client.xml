@@ -1,0 +1,50 @@
+<?xml version="1.0" standalone="no"?>
+
+<kickstart roll="base">
+
+  <description>
+  
+  Mail support for nodes in the cluster. These nodes do not accept
+  mail for local delivery. They pass everything to a mail hub (generally
+  the frontend).
+
+  </description>
+
+
+<changelog><![CDATA[
+  Based on 
+  $Log: mail-client.xml,v $
+  Revision 1.5  2012/11/01 17:29:07  clem
+]]></changelog>
+
+<post>
+
+<file name="/etc/postfix/main.cf" mode="append">
+#
+# Rocks Postfix configuration for cluster nodes.
+#
+mydestination = 
+# enable only ipv4 so postfix does not complain that ipv6 is not active
+inet_protocols = ipv4
+myorigin = &Kickstart_PrivateDNSDomain;
+relayhost = &Kickstart_PrivateGateway;
+masquerade_domains = &Kickstart_PrivateDNSDomain;
+append_dot_mydomain = no
+</file>
+<!-- Linux supports hash type maps -->
+<file name="/etc/postfix/main.cf" mode="append" os="linux">
+canonical_maps = hash:/etc/postfix/canonical
+</file>
+
+cat /etc/postfix/canonical | grep -v "^root" > /tmp/canonical
+/bin/mv /tmp/canonical /etc/postfix/canonical
+
+<file name="/etc/postfix/canonical" mode="append">
+root root@&Kickstart_PrivateDNSDomain;
+</file>
+
+/usr/sbin/postmap /etc/postfix/canonical
+
+</post>
+
+</kickstart>

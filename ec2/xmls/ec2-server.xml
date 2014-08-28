@@ -1,0 +1,26 @@
+<?xml version="1.0" standalone="no"?>
+
+<kickstart roll="ec2">
+<description> 
+Put support files on a Rocks frontend that enables building EC2-compatible VMs
+</description>
+
+<post>
+/opt/rocks/bin/rocks set attr vtunServer value=&Kickstart_PublicHostname;
+
+if [ -f /tmp/reconfig/ec2]; then
+    ec2=`cat /tmp/reconfig/ec2`
+    if $ec2; then # EC2 true
+        /opt/rocks/bin/rocks remove appliance route ec2-dynamic 0.0.0.0 
+        #/opt/rocks/bin/rocks add appliance route ec2-dynamic 0.0.0.0 netmask=255.255.255.255 &Kickstart_PrivateAddress;
+        /opt/rocks/bin/rocks remove network ec2private
+        /opt/rocks/bin/rocks remove network ec2public
+        /opt/rocks/bin/rocks remove network ec2tunnel
+    fi
+fi
+
+</post>
+</kickstart>
+
+
+

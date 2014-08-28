@@ -1,0 +1,44 @@
+<?xml version="1.0" standalone="no"?>
+
+<kickstart roll="base">
+
+
+<description>
+Server node firewall rules
+</description>
+
+<changelog><![CDATA[
+Based on 
+$Log: server-firewall.xml,v $
+Revision 1.19  2011/06/30 04:43:54 
+
+]]></changelog>
+
+<!-- create the firewall rules for the frontend -->
+
+<post>
+
+<!-- only needed on ec2 -->>
+if [ -f /tmp/reconfig/ec2]; then
+    ec2=`cat /tmp/reconfig/ec2`
+    if $ec2; then
+        /opt/rocks/bin/rocks remove firewall host=localhost rulename=MASQUERADE
+        /opt/rocks/bin/rocks add firewall host=localhost output-network=private \
+            service="nat" protocol="all" action="MASQUERADE" \
+            chain="POSTROUTING" rulename="MASQUERADE" rulesrc="system"
+    fi
+fi
+
+/opt/rocks/bin/rocks report host firewall localhost | \
+	/opt/rocks/bin/rocks report script \
+	attrs="{'Kickstart_PublicNetwork':'&Kickstart_PublicNetwork;', \
+	'Kickstart_PublicNetmask':'&Kickstart_PublicNetmask;'}" \
+	> /tmp/do-firewall.sh
+
+chmod a+x /tmp/do-firewall.sh
+/tmp/do-firewall.sh
+
+</post>
+
+
+</kickstart> 

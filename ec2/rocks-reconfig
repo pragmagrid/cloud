@@ -1,0 +1,911 @@
+#!/opt/rocks/bin/python
+
+import os
+import os.path
+import errno
+import sys
+import string
+import getopt
+import shutil
+import UserDict
+import re
+import stat
+import subprocess
+import logging
+import datetime
+import urllib2
+import hashlib
+from IPy import IP
+from pprint import pprint
+
+
+class App:
+    def __init__(self, argv):
+        self.args       = argv[1:]
+        self.usage_name = os.path.basename(argv[0])
+        self.path       = os.path.dirname(os.path.abspath(argv[0]))
+ 
+        self.setDefaults()
+        self.parseArgs()
+        self.setBase()
+        self.setLogger()
+
+    def setDefaults(self):
+        """ set default attributes """
+        self.nodedir = "/export/rocks/install/rocks-dist/x86_64/build/nodes/" # node xml files dir
+        self.base        = "/tmp/reconfig/"          # reconfiguration directory tree
+        self.scripts     = self.base + "scripts/"    # reconfig scripts
+        self.compute     = self.scripts + "compute/" # xml files for compute nodes
+        self.computeSge  = self.compute + "sge/"     # sge config files for compute nodes
+        self.xmls        = self.path + "/xmls/"      # rewritten xml files 
+        self.orig        = self.base + "orig/"       # saving previous config 
+        self.logfile     = "%s%s.log" % (self.base, self.usage_name)
+        self.rolls       = []                        # installed on the cluster
+
+        # attributes
+        self.oattrs      = {}                        # dictionary of original  attrs
+        self.oattrsfile  = self.orig + "attrs"       # file for original attrs
+        self.attrs       = {}                        # dictionary of reconfigured attrs
+        self.attrsfile   = self.base + "attrs"       # file for new attrs
+
+        # skip these xml files processing, all is done by original install
+        self.skip = ["login-server.xml", "rocks-dist.xml", "kvm-server-db-data.xml",
+                     "grub-server.xml", "do-partition.xml", "base.xml",
+                     "411-server.xml", "install.xml", 
+                     "restore-node.xml", "kvm-server.xml"]
+
+        # rewrite these files, original have parts that should not be done again
+        self.rewrite = ["nfs-server.xml", "database-data.xml", "server-firewall.xml" ]     
+        self.rewriteCompute = ["networking-client.xml", "mail-client.xml", "resolv.xml"]
+
+        # rewrite these xml files if a roll is installed
+        self.rollsUpdate = {
+                      'sge':['sge-server.xml', 'sge-base.xml'], 
+                      'opal':['opal-server.xml','opal-common.xml','opal-ec2.xml'], 
+                      'pdb2pqr':['pdb2pqr-server.xml'], 
+                      'autodock':['autodock-server.xml'],
+                      'condor':['condor-server.xml'],
+                      'ec2':['ec2-server.xml']
+                     }
+        self.rollsUpdateCompute = {
+                      'sge':['sge-client.xml', 'sge-base.xml'], 
+        }
+
+        self.orderFrontend = []    # frontend kickstart traversal order 
+        self.orderCompute  = []    # compute node kickstart traversal order 
+        self.xmllist       = []    # list of xml files with Kickstart_Private, Kickstart_Public or &hostname;
+        self.posts         = []    # list of post scripts to run for reconfiguration
+        self.fe            = False # True if running on frontend
+        self.ec2           = False # True if running on EC2
+        self.curl          = 'curl -sf http://169.254.169.254/latest/' # for meta-data access on ec2
+
+        self.hash          = ""                       # md5 hash for download files (by compute node)
+        self.digestfile    =  self.base + "digest"    # file for md5 hashes
+        self.orderfile      =  self.base + "order"     # file with compute node xml traversal order 
+
+
+    def setLogger(self):
+        """ create logger. Available logging levels: debug,info,warn,error,critical """
+        self.logger = logging.getLogger(self.usage_name)
+        self.logger.setLevel(logging.DEBUG)
+
+        # file handler
+        fh = logging.FileHandler(self.logfile)
+        fh.setLevel(logging.DEBUG)
+
+        # console handler 
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)
+
+        # formatter Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        formatter = logging.Formatter('%(asctime)s %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M')
+        ch.setFormatter(formatter)
+        fh.setFormatter(formatter)
+        
+        # add handlers to logger
+        self.logger.addHandler(ch)
+        self.logger.addHandler(fh)
+
+        
+    def setEC2(self):
+        """ check if running on EC2 """
+        __name__ = "setEC2"
+
+        info = self.getCmdPipe(self.curl, __name__)
+        lines = info.splitlines()
+        if len(lines):
+            self.ec2 = True
+            lines = "true"
+        else:
+            lines = "false"
+        self.writeFile (self.base + "ec2", lines)
+
+        self.logger.info("Running on EC2: %s" % self.ec2 )
+
+    def parseArgs(self):
+        """ check input arguments """
+
+        leng = len(self.args) 
+        if leng == 0:   # no arguments, reconfiguring frontend
+            self.fe = True
+        elif leng == 1: # single argument  
+            if self.args[0] in ('-h', '-help', '--help'):
+                self.usage()
+            self.fe = False 
+            self.compute_setDefaults() # reconfiguring compute node
+
+        else:          # wrong arguments
+            self.usage()
+
+
+    def getCmdPipe(self, cmd, func):
+        """ get output from the shell commands pipe. Retunrs pipe output as a string """
+        info, err = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+
+        if err:
+            self.logger.error("Failed in %s() with error: %s"  % (func, err))
+            sys.exit()
+        return info
+
+
+    def setMac(self, iface):
+        """ find MAC on public and private interfaces. Call after self.attrs has been defined"""
+        __name__ = "setMac"
+
+        if self.attrs == {} :
+           self.logger.error("Failed in %s(): Dictionary self.attrs is empty." % __name__)
+           sys.exit()
+
+        str = "HWaddr "
+        info = self.getCmdPipe('/sbin/ifconfig %s | grep %s' % (iface, str), __name__)
+        line = info.splitlines()[0]
+        index = line.find(str)
+        mac = string.lower(line[index + len(str) :]).strip()
+        self.attrs[iface] = mac
+            
+    def findDNS(self):
+        """find dns servers, return as a string"""
+        __name__ = "findDNS"
+
+        servers = ""
+        str = "nameserver"
+        info = self.getCmdPipe('/bin/cat /etc/resolv.conf | grep %s' % str, __name__)
+        lines = info.splitlines()
+        for i in lines:
+            addr = i[i.find(str) + len(str) + 1 : ]
+            if addr == '127.0.0.1': continue
+            servers += addr
+            servers += ','
+        servers = servers[0:-1] # remove last ','
+        return servers
+
+    def findGateway(self):
+        """ find gateway, return as a string"""
+        __nme__ = "findGateway"
+        info = self.getCmdPipe('netstat -rn | grep "^0.0.0.0"', __name__)
+        gateway = info.split()[1]
+        return gateway 
+
+    def findHostnameDomain(self, ip):
+        """find hostname, fqdn and domain name, return as a tuple """
+        __nme__ = "findHostnameDomain"
+        if self.ec2:
+            #FIXME test EC2
+            #info = self.getCmdPipe('echo ip-10-1-0-105', __name__)
+            info = self.getCmdPipe('/bin/hostname', __name__)
+            hostname = info.split()[0]
+            #FIXME test EC2
+            #info = self.getCmdPipe('echo "178.62.23.107.in-addr.arpa domain name pointer ec2-107-23-62-178.compute-1.amazonaws.com."' , __name__)
+            info = self.getCmdPipe('/usr/bin/host %s' % ip, __name__)
+            parts = info.split()
+            fqdn = parts[-1][:-1]  # find last list item, drop last '.'
+            i = fqdn.find('.')
+            domain = fqdn[i + 1:]
+        else:
+            info = self.getCmdPipe('/bin/grep ^HOSTNAME /etc/sysconfig/network', __name__)
+            parts = info.split()[0]
+            fqdn = parts.split('=')[1]
+            i = fqdn.find('.')
+            hostname = fqdn[0:i]
+            domain = fqdn[i+1:]
+        return (hostname, fqdn, domain)
+
+    def findIfaceVals(self, iface):
+        """find ip, netmask, subnet, cidr, broadcast for a given interface. return as a tuple"""
+        __name__ = "findIfaceVals"
+
+        info = self.getCmdPipe('/sbin/ifconfig %s | grep Mask' % iface, __name__)
+        parts = info.split()
+        tmp, ip = parts[1].split(':')
+        tmp, netmask = parts[3].split(':')
+
+        i = IP(ip).make_net(netmask) 
+        broadcast = i.broadcast().strNormal()
+        subnet, cidr = (i.strNormal()).split('/')
+
+        return (ip, netmask, subnet, cidr, broadcast) 
+
+    def findIfaceValsEC2(self, iface):
+        """Valid on EC2. find ip, netmask, subnet, cidr, broadcast for a public interface. 
+           Return as a tuple"""
+        __name__ = "findIfaceValsEC2"
+
+        # find public ip
+        info = self.getCmdPipe( 'echo 178.62.23.107', __name__) #FIXME test EC2
+        info = self.getCmdPipe( self.curl + 'meta-data/public-ipv4/', __name__)
+        ip = info.split()[0]
+        netmask = '255.255.255.0'
+
+        i = IP(ip).make_net(netmask) 
+        broadcast = i.broadcast().strNormal()
+        subnet, cidr = (i.strNormal()).split('/')
+
+        return (ip, netmask, subnet, cidr, broadcast) 
+
+    def setNetworkVals(self, iface, itype):
+        """ find interface values and update self.attrs"""
+        __name__ = "setNetworkVals"
+
+        if self.ec2 and itype == 'Public':
+            (ip, netmask, subnet, cidr, broadcast) = self.findIfaceValsEC2(iface)
+        else:
+            (ip, netmask, subnet, cidr, broadcast) = self.findIfaceVals(iface)
+
+        hostname, fqdn, domain = self.findHostnameDomain(ip)
+        servers = self.findDNS()   
+        gateway = self.findGateway()
+        
+        # update attrs with new values
+        self.attrs["Kickstart_" + itype + "Address"]       = ip
+        self.attrs["Kickstart_" + itype + "Netmask"]       = netmask
+        self.attrs["Kickstart_" + itype + "Broadcast"]     = broadcast
+        self.attrs["Kickstart_" + itype + "Network"]       = subnet
+        self.attrs["Kickstart_" + itype + "NetmaskCIDR"]   = cidr
+
+        if itype == 'Private':
+            self.attrs["Kickstart_" + itype + "DNSServers"]    = ip
+            self.attrs["Kickstart_" + itype + "SyslogHost"]    = ip
+            self.attrs["Kickstart_" + itype + "KickstartHost"] = ip
+            self.attrs["Kickstart_" + itype + "NTPHost"]       = ip
+            self.attrs["Kickstart_" + itype + "Gateway"]       = ip
+            self.attrs["Kickstart_" + itype + "Hostname"]      = hostname
+        else:
+            self.attrs["Kickstart_" + itype + "Gateway"]       = gateway
+            self.attrs["Kickstart_" + itype + "DNSServers"]    = servers
+            self.attrs["Kickstart_" + itype + "Hostname"]      = fqdn
+            self.attrs["Kickstart_" + itype + "DNSDomain"]     = domain
+
+### Functions related to kickstart graph traversal info 
+    def postOrder(self):
+        """ find traversal order: all xml files with Kickstart_Public, Kickstart_Private
+            or &hostname; set order variables for frontend and compute node"""
+        __name__ = "postOrder"
+
+        withPrivate   = self.getListing('private')  # files with Kickstart_Private
+        withPublic    = self.getListing('public')   # files with Kickstart_Public
+        withHostname  = self.getListing('hostname') # files with &hostname;
+        self.xmllist = list(set(withPrivate + withPublic + withHostname)) # rm duplicates
+        
+        # get frontend traversal order 
+        info = self.getCmdPipe('/opt/rocks/bin/rocks list host | grep Frontend | grep -v vm | head -1', __name__)
+        parts = info.splitlines()
+        if len(parts) > 1 :
+            self.logger.error("Failed in %s(): There are %s frontends in the cluster." % (__name__, len(parts)) )
+            sys.exit(-1)
+        if parts:
+            frontend, tmp = parts[0].split(':')
+            self.orderFrontend = self.getXmlOrder(frontend)
+
+        # get compute node traversal order
+        info = self.getCmdPipe('/opt/rocks/bin/rocks list host compute | grep Compute | head -1', __name__)
+        parts = info.split()
+        if parts:
+            compute, tmp = parts[0].split(':')
+            self.orderCompute = self.getXmlOrder(compute)
+        else:
+           self.logger.warning("There are no compute nodes in the cluster" )
+
+    def getXmlOrder(self, node):
+        """ find xml files traversal order for a given node, return as a list """
+        __name__ = "getXmlOrder"
+
+        # FIXME use here next line
+        #info = self.getCmdPipe('/opt/rocks/bin/rocks list host profile %s | grep "^# \.\/nodes\/"' % node , __name__)
+        info = self.getCmdPipe('/bin/cat profile-%s |  grep "^# \.\/nodes\/"' % node, __name__)
+        lines = info.splitlines()
+        start="nodes/"
+        end="xml"
+        order = []
+        for i in lines:
+            name = i[i.find(start) + len(start) : i.find(end) + len(end)]
+            if name in self.skip: continue
+            if (name in self.xmllist):
+                order.append(name)
+
+        return order
+
+    def getListing(self, str):
+        """ find all xml files that reference Kickstart_Private or Kickstart_Public """
+        __name__ = "getListing"
+        types = {'private':'"Kickstart_Private"', 'public':'"Kickstart_Public"', 'hostname':'"&hostname;"' }
+
+        info = self.getCmdPipe('grep -r -l %s %s' % (types[str], self.nodedir), __name__)
+        lines = info.splitlines()
+        list = []
+        for i in lines:
+            list.append (i.replace(self.nodedir, ''))
+        return list
+
+
+    def getAttrs(self):
+        """ get original frontend attrs """
+        if self.ec2:
+            node = ""
+        else:
+            node = "localhost"
+        os.system("/opt/rocks/bin/rocks report host attr %s pydict=true | tr -d '\n' > %s" % (node, self.oattrsfile))
+
+        # original attrs 
+        f = open(self.oattrsfile)
+        self.oattrs = eval('%s' % f.read())
+        f.close()
+
+        # start new attrs 
+        self.attrs = self.oattrs
+
+    def getRolls(self):
+        """ Check what other xml files need to rewrite for extra rolls """
+        __name__ = "getRolls"
+        info = self.getCmdPipe('/opt/rocks/bin/rocks list roll | grep "yes"', __name__)
+        info = self.getCmdPipe('cat temp-roll-info | grep "yes"', __name__) #FIXME rm this line
+        lines = info.splitlines()
+
+        for i in lines:
+            name = i[:i.find(":")]
+            self.rolls.append(name)
+
+
+    def updateNetworking(self):
+        """ update attributres with new network values """
+
+        # find new MACs  
+        self.setMac(self.attrs["Kickstart_PrivateInterface"])
+        self.setMac(self.attrs["Kickstart_PublicInterface"])
+
+        # find new interface values
+        self.setNetworkVals(self.attrs["Kickstart_PrivateInterface"], 'Private')
+        self.setNetworkVals(self.attrs["Kickstart_PublicInterface"], "Public")
+
+
+    def updateName(self):
+        """  update host name """
+        self.attrs["hostname"] = self.attrs["Kickstart_PrivateHostname"]
+        self.attrs["tripwire_mail"] = "root@localhost"
+
+        sqlfile = self.scripts + "name-update.sql" 
+        fname   = self.scripts + 'name-update.sh'
+        lines = "#!/bin/bash\n\n"
+        lines += 'exit\n' #FIXME rm this line
+        lines += "LOG=%s/log\n\n" % self.base
+        lines += '/bin/echo "update catindex set Name=\'%s\' where Name=\'%s\' and Category=(select ID from categories where Name=\'host\');" > %s\n\n'  \
+                % (self.attrs["Kickstart_PrivateHostname"], self.oattrs["Kickstart_PrivateHostname"], sqlfile)
+        lines += '/opt/rocks/bin/mysql -u apache cluster < %s  >> $LOG 2>&1 \n\n' % sqlfile
+        lines += '/opt/rocks/bin/rocks set host name frontend %s  >> $LOG 2>&1 \n' % self.attrs["Kickstart_PrivateHostname"]
+        lines += 'rocks set attr hostname %s >> $LOG 2>&1\n\n' % self.attrs["Kickstart_PrivateHostname"]
+
+        self.writeFile (fname, lines)
+        os.system(fname)
+
+    def updateDist(self):
+        """ these variables are not available outside of kickstart, needed by yum.xml """
+        __name__ = "updateDist"
+        info = self.getCmdPipe('/opt/rocks/bin/rocks list distribution | grep -v NAME', __name__)
+        self.attrs["distribution"] = info.splitlines()[0]
+
+        info = self.getCmdPipe('/bin/uname -p', __name__)
+        self.attrs["arch"] = info.splitlines()[0]
+        self.attrs["version"] = self.attrs["rocks_version"]
+
+    def updateAttrs(self):
+        self.updateNetworking()
+        self.updateName()
+        self.updateDist()
+
+    def cleanRoutes(self):
+        """ remove old routes """
+        return #FIXME rm this line 
+        os.system("/opt/rocks/bin/rocks remove route %s\n" % self.oattrs['Kickstart_PublicAddress'])
+        os.system("/opt/rocks/bin/rocks remove host route 0.0.0.0\n\n")
+
+### Funcitons to create and run post sections
+    def createPosts(self):
+        """ create frontend post scripts  """
+
+        # check for rewrite xml files for optional rolls
+        names = self.rollsUpdate.keys()
+        for i in self.rolls:
+            if i in names:
+                self.rewrite += self.rollsUpdate[i]
+
+        for i in self.orderFrontend:
+           if i in self.rewrite:
+               xmldir = self.xmls    # using rewrittne xml 
+           else:
+               xmldir = self.nodedir # using original xml
+
+           if not os.path.isfile(xmldir + i):
+               self.logger.error("File %s does not exist." % (xmldir + i) )
+               sys.exit(1)
+
+           fname = "%s%s" % (self.scripts, i.replace('xml', 'sh'))
+           self.posts.append(fname)
+           self.writePostFile(xmldir, i, fname)
+
+    def writePostFile(self, xmldir, xmlfile, fname):
+        """ create post file """
+        cmd = '/bin/cat %s/%s | /opt/rocks/bin/rocks report post attrs="`/bin/cat %s`" > %s' % (xmldir, xmlfile, self.attrsfile, fname)
+        self.logger.info("Creating %s" % fname )
+        os.system(cmd)
+        os.chmod(fname, stat.S_IRWXU | stat.S_IRWXG | stat.S_IROTH)
+
+
+    def postRun(self):
+        """ run post scripts and sync commands """
+        for i in self.posts:
+            self.logger.info("Running %s" % i.replace(self.scripts, ''))
+            # FIXME: check each script before uncommenting
+            # os.system(i)
+
+    def postFinish(self):
+        """ remaining configuration and sync """
+        # update html docs
+        self.updateRollDocs()
+
+        # sync all configuration
+        lines = '#!/bin/bash \n'
+        lines += 'exit\n'  # FIXME rm this line
+        lines += 'LOG=%slog\n' % self.base
+        lines += 'touch $LOG \n\n'
+        lines += 'echo "Running rocks report host route localhost " | tee -a $LOG\n'
+        lines += '/opt/rocks/bin/rocks report host route localhost | rocks report script | /bin/sh 2>&1 | tee -a $LOG\n'
+        lines += 'echo "Running rocks sync config" | tee -a $LOG\n'
+        lines += '/opt/rocks/bin/rocks sync config 2>&1 | tee -a $LOG\n'
+        lines += 'echo "Running rocks sync host condor localhost" | tee -a  $LOG\n'
+        lines += '/opt/rocks/bin/rocks sync host condor localhost 2>&1 | tee -a $LOG\n'
+        lines += 'echo "Running rocks sync host firewall localhost" | tee -a  $LOG\n'
+        lines += '/opt/rocks/bin/rocks sync host firewall localhost 2>&1 | tee -a $LOG\n'
+        lines += 'echo "Running rocks sync host network localhost" | tee -a  $LOG\n'
+        lines += '/opt/rocks/bin/rocks sync host network localhost 2>&1 | tee -a $LOG\n'
+        lines += 'echo "Running rocks sync host sec_attr " | tee -a  $LOG\n'
+        lines += '/opt/rocks/bin/rocks sync host sec_attr 2>&1 | tee -a $LOG\n'
+        lines += 'echo "Running rocks sync host sharedkey " | tee -a  $LOG\n'
+        lines += '/opt/rocks/bin/rocks sync host sharedkey 2>&1 | tee -a $LOG\n\n'
+        lines += '# run post 90 scripts\n '
+        lines += 'echo "Running post-90-condor" | tee -a  $LOG\n'
+        lines +='/sbin/service rocks-condor start 2>&1 | tee -a $LOG\n\n'
+        lines += 'echo "Running post-01-sge" | tee -a  $LOG\n'
+        lines +='/etc/rc.d/rocksconfig.d/post-01-sge-qmaster 2>&1 | tee -a $LOG\n\n'
+        lines += 'iscripts=`(cd /etc/init.d; ls sge*)`\n'
+        lines += 'for i in $iscripts; do\n'
+        lines += '    /sbin/chkconfig --add $i 2>&1 | tee -a $LOG\n'
+        lines += '    /sbin/chkconfig $i on 2>&1 | tee -a $LOG\n'
+        lines += 'done\n\n'
+        lines += 'echo "Running post-99-opaldeploy" | tee -a  $LOG\n'
+        lines +='/etc/rc.d/rocksconfig.d/post-99-opaldeploy 2>&1 | tee -a $LOG\n\n'
+
+        fname   = self.scripts + 'post-finish.sh'
+        self.writeFile (fname, lines)
+        os.system(fname)
+
+    def postLink(self):
+        """ link files for compute nodes in http accessible area """
+
+        # copy sge files, they are normally available at kickstart
+        files = sorted (['act_qmaster', 'configuration', 'settings.sh', 
+                 'settings.csh','bootstrap', 'cluster_name', 'sgeexecd'])
+        sgesrc = '/opt/gridengine/default/common/'
+
+        if os.path.exists(self.computeSge):
+            shutil.rmtree(self.computeSge)
+
+        try:
+            os.makedirs(self.computeSge)
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
+        for i in files:
+            shutil.copy2(sgesrc + i, self.computeSge)
+
+        # make link for wget access by compute nodes
+        try:
+            os.symlink(self.base, '/var/www/html')
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
+
+
+    def postXML(self):
+        """ create xml files needed by compute nodes """
+
+        # copy existing xml files 
+        for i in self.orderCompute:
+            shutil.copy2(self.nodedir + i, self.compute)
+
+        # rewrite some
+        self.rewriteXML()
+
+        # record compute node traversal order 
+        from cPickle import dump
+        dump(self.orderCompute, open(self.orderfile, "wb"))
+
+    def rewriteXML(self):
+        """ rewrite xml files for compute nodes,  originals have steps that can't be repeated """
+
+        # add xml files that need rewriting for optional rolls
+        names = self.rollsUpdateCompute.keys()
+        for i in self.rolls:
+            if i in names:
+                self.rewriteCompute += self.rollsUpdateCompute[i]
+
+        for i in self.rewriteCompute :
+            src = self.xmls + i
+            dest = self.compute + i
+            if not os.path.isfile(src):
+                self.logger.warning("File %s does not exist. Using original. This may result in error." % src )
+                continue
+            self.logger.info("Rewriting compute xml %s" % dest )
+            shutil.copy2(src, dest)
+
+    def writeFile(self, fname, lines):
+        """ create a file specified by fname with a content specified by lines"""
+        f = open(fname, 'w')
+        f.write(lines)
+        f.close()
+        if fname.find(".sh") > 0:
+            os.chmod(fname, stat.S_IRWXU | stat.S_IRWXG | stat.S_IROTH)
+
+
+### Utility functions
+    def setBase(self):
+        """ create output dirs """
+        dlist = [self.base, self.scripts, self.orig, self.compute]
+        for dir in dlist:
+            try:
+                os.makedirs(dir)
+            except OSError as e:
+                if e.errno != errno.EEXIST:
+                    raise
+
+    def usage(self):
+        lines  = "\nUsage: %s [frontend=IP]\n\n" % self.usage_name
+        lines += "Description: \n"
+        lines += "    Reconfigures a host with new network settings.\n"
+        lines += "    Command is executed on a host being reconfigured.\n\n"
+        lines += "Arguments: \n"
+        lines += "    frontend=IP, where IP is a private IP addresss of a frontend.  \n"
+        lines += "    Argument is used only for reconfiguring compute nodes.\n\n"
+        lines += "Example to reconfigure frontend: \n"
+        lines += "    $ %s \n\n" % self.usage_name
+        lines += "Example to reconfigure a compute node: \n"
+        lines += "    $ %s frontend=10.5.1.1 \n\n" % self.usage_name
+        print lines
+
+        sys.exit(0)
+
+    def saveOrigVals(self):
+        """save original db """
+        __name__ = "saveOrigVals"
+        file = self.orig + 'mysql-backup-cluster.' + self.oattrs['hostname']
+        # FIXME uncomment next line
+        #info = self.getCmdPipe('/opt/rocks/bin/mysqldump -u apache --opt cluster > %s' % file, __name__)
+
+        # save old hostname info, needed for a few reconfig scripts to find old cluster name
+        fname = self.orig + 'hostname'
+        lines = self.oattrs['hostname']
+        self.writeFile (fname, lines)
+
+        fname = self.orig + 'fqdn'
+        lines = self.oattrs['Kickstart_PublicHostname']
+        self.writeFile (fname, lines)
+
+
+
+    def stopOrigServices(self):
+        """ stop services with old host configuration """
+        if 'opal' in self.rolls:
+            script = "stop-opal.sh"
+            fname = self.scripts + script
+            lines = '#!/bin/bash \n'
+            lines += 'exit\n'  # FIXME rm this line
+            lines += "/sbin/service tomcat-opal stop\n"
+
+            self.writeFile (fname, lines)
+            self.logger.info("Executing %s" % script)
+            os.system(fname)
+
+        if 'condor' in self.rolls:
+            script = "stop-condor.sh"
+            fname = self.scripts + script
+            lines = '#!/bin/bash \n'
+            lines += 'exit\n'  # FIXME rm this line
+            lines += "/sbin/service rocks-condor stop\n"
+            lines += "ips=`ps -ef | grep condor | grep -v grep | awk '{print $2}'`\n"
+            lines += "for i in $ips ;\n"
+            lines += "do\n"
+            lines += "    kill -9  $i\n"
+            lines += "done\n"
+
+            self.writeFile (fname, lines)
+            self.logger.info("Executing %s" % script)
+            os.system(fname)
+        
+        if 'sge' in self.rolls:
+            script = "stop-sge.sh"
+            fname = self.scripts + script
+            lines = '#!/bin/bash \n'
+            lines += 'exit\n'  # FIXME rm this line
+            lines += 'NAME=%s\n' % self.oattrs['hostname']
+            lines += 'SAVE=%s\n' % self.orig
+            lines += 'if [ -f /etc/init.d/sgemaster.$NAME ]; then\n'
+            lines += '    /etc/init.d/sgemaster.$NAME stop\n'
+            lines += '    chkconfig --del sgemaster.$NAME\n'
+            lines += '    mv /etc/init.d/sgemaster.$NAME $SAVE\n'
+            lines += 'fi\n'
+            lines += 'if [ -f /etc/init.d/sgeexecd.$NAME ]; then\n'
+            lines += '    /etc/init.d/sgeexecd.$NAME stop\n'
+            lines += '    chkconfig --del sgeexecd.$NAME\n'
+            lines += '    mv /etc/init.d/sgeexecd.$NAME $SAVE\n'
+            lines += 'fi\n'
+            lines += 'mv /opt/gridengine/default /opt/gridengine/default.$NAME\n'
+
+            self.writeFile (fname, lines)
+            self.logger.info("Executing %s" % script)
+            os.system(fname)
+
+    def updateRollDocs(self):
+        """ update rolls docs Kickstart_PublicHostname """
+        lines = '#!/bin/bash \n'
+        lines += 'exit\n'  # FIXME rm this line
+        lines += 'tempname="%s"\n' % self.oattrs['Kickstart_PublicHostname']
+        lines += 'realname="%s"\n' % self.attrs['Kickstart_PublicHostname']
+        lines += 'change_list2=`grep -r -l $tempname /var/www/html/roll-documentation`\n'
+        lines += 'for i in $change_list2; do\n'
+        lines += '   sed -i "s/$tempname/$realname/g" $i;\n'
+        lines += 'done\n'
+
+        fname = self.scripts + 'roll-docs-update.sh'
+        self.writeFile (fname, lines)
+        os.system(fname)
+
+    def getFileHash(self, fname):
+        """ get md5 hash for file"""
+        f = open(fname, 'rb')
+        str = hashlib.md5(f.read()).hexdigest()
+        f.close()
+        self.hash += "%s  %s\n" % (fname, str)
+
+    def getHashes(self):
+        """ create all md5 hashes """
+        self.getFileHash(self.attrsfile)
+        self.getFileHash(self.orderfile)
+
+        for i in self.orderCompute:
+            self.getFileHash(self.compute + i)
+
+        for i in sorted(os.listdir(self.computeSge)):
+           self.getFileHash(self.computeSge + i)
+
+        if self.fe:
+            self.writeFile (self.digestfile, self.hash)
+
+
+### Output functions
+    def printAttrs(self, dict):
+        if dict:
+            fmt="'%s':'%s',"
+            file = self.attrsfile
+            start="{"
+            end="}"
+        else:
+            fmt="%s:%s\n"
+            file = self.base + "attrs.txt"
+            start=""
+            end=""
+        keys = self.attrs.keys()
+        keys.sort()
+        output = start
+        for key in keys:
+            output += fmt % (key, self.attrs[key])
+        output += end
+        f = open(file, 'w')
+        f.write(output)
+        f.close()
+
+
+    def startLog(self):
+        """ record start time stamp """
+        self.logger.info("Start reconfiguration")
+
+
+    def endLog(self):
+        """ record end time stamp """
+        self.logger.info("End reconfiguration")
+
+
+    def runTest(self):
+        """ for testing """
+        pprint (self.__dict__)
+
+    def compute_checkIP(self):    
+        """ check forntend IP """
+        if self.args[0].startswith('frontend='):
+            tmp, ip = self.args[0].split('frontend=')
+            try:
+                IP(ip)
+                self.feIP = ip
+            except ValueError as e:
+                print "\nERROR input for IP address: %s" % e
+                self.usage()
+        else:
+            self.usage()
+
+    def compute_setDefaults(self):
+        """ set variables needed only on compute node """
+        self.compute_checkIP()                   # find frontend IP
+        self.timeout = 10                        # timeout (sec) for urlopen request
+        self.wgetlogfile = self.base + 'wgetlog' # wget logfile 
+        self.wget    = 'wget -e robots=off -nH  -np -r --cut-dirs=2  --level=1 --reject "index.html*" http://%s' % self.feIP # wget command
+
+
+    def compute_downloadFiles(self):
+        """ download needed files from frontend. log wget output """
+        __name__ = "compute_downloadFiles"
+
+        # test frontend's response to http requests
+        try:
+            r = urllib2.urlopen("http://%s" % self.feIP, timeout=self.timeout)
+        except urllib2.URLError as e:
+            self.logger.error("Failed in %s(): Frontend %s is not responding: %s" % (__name__, self.feIP, e.reason))
+            sys.exit(1)
+
+        savepath = os.getcwd()
+        wgetStdout = ""
+        i = self.base.find('reconfig') # for prefix path trimming
+        if self.feIP: 
+            # download digest file   
+            cmd = "%s/%s" % (self.wget, self.digestfile[i:])
+            os.chdir(self.base)
+            info, err = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+            wgetStdout += err
+
+            # download order file   
+            cmd = "%s/%s" % (self.wget, self.orderfile[i:])
+            os.chdir(self.base)
+            info, err = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+            wgetStdout += err
+
+            # download attrs file   
+            cmd = "%s/%s" % (self.wget, self.attrsfile[i:])
+            os.chdir(self.base)
+            info, err = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+            wgetStdout += err
+
+            # download compute node xml files 
+            cmd =  "%s/%s" % (self.wget, self.compute[i:])
+            os.chdir(self.scripts)
+            info, err = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+            wgetStdout += err
+
+            # download sge config files  
+            cmd =  "%s/%s" % (self.wget, self.computeSge[i:])
+            os.chdir(self.scripts)
+            info, err = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+            wgetStdout += err
+
+        os.chdir(savepath)
+        self.writeFile (self.wgetlogfile, wgetStdout)
+
+        if wgetStdout.find("ERROR 404") > 0 :
+            self.logger.error("Failed in %s(): Download files error. Check %s for details" % (__name__, self.wgetlogfile))
+            sys.exit(1)
+        
+          
+    def compute_checkFiles(self):
+        """ check downloaded files."""
+        __name__ = "downloadFilesCompute"
+        self.getHashes()
+        f = open(self.digestfile)
+        fhash = f.read()
+        f.close()
+
+        if self.hash == fhash: 
+            self.logger.info("Download files from frontend SUCCESS ")
+        else:
+            self.logger.info("Download files from frontend FAILURE ")
+            sys.exit(1)
+
+    def compute_getXmlOrder(self):
+        """ get xml traversal order """
+        __name__ = "compute_getXmlOrder"
+        from cPickle import load
+        try:
+            self.orderCompute = load(open(self.orderfile, 'rb'))
+        except IOError as e:
+            self.logger.error("Failed in %s(): %s" % (__name__, e))
+            sys.exit(1)
+            
+    def compute_getAttrs(self):
+        """ get attrs from a file and add 'hostaddr' """
+        f = open(self.attrsfile)
+        self.attrs = eval('%s' % f.read())
+        f.close()
+
+    def compute_updateAttrs(self):
+        """ update attrs  """
+        iface = self.attrs["Kickstart_PrivateInterface"]
+        (ip, netmask, subnet, cidr, broadcast) = self.findIfaceVals(iface)
+        self.attrs["hostaddr"] = ip
+
+    def compute_createPosts(self):
+        """ create compute node  post scripts  """
+
+        for i in self.orderCompute:
+           if not os.path.isfile(self.compute + i):
+               self.logger.error("File %s does not exist." % (self.compute + i) )
+               sys.exit(1)
+
+           fname = "%s%s" % (self.scripts, i.replace('xml', 'sh'))
+           self.posts.append(fname)
+           print "XML %s" % i
+           self.writePostFile(self.compute, i, fname)
+
+
+    def runFrontend(self):
+        """ reconfigure frontend """
+        self.getAttrs()         # find orig attributes
+        self.getRolls()         # find installed rolls
+        self.postOrder()        # find traversal order
+        self.saveOrigVals()     # save original db and a few extra values
+        self.stopOrigServices() # stop services whose configurations will be rewritten 
+        self.updateAttrs()       # update attrs with new values 
+        self.printAttrs(True)   # print new attrs as a dictionary
+        self.printAttrs(False)  # print new attrs as a text file (info)
+        self.createPosts()       # create post scripts 
+        self.postXML()          # create xml files for compute nodes
+        self.cleanRoutes()      # rm old routes 
+        self.postRun()          # run post scripts and sync commands
+        self.postFinish()       # remaining few tasks 
+        self.postLink()         # make files available for compute nodes via http
+        self.getHashes()        # make hash for files available for compute nodes
+
+
+    def runCompute(self):
+        """ reconfigure compute node """
+        self.compute_downloadFiles()     # download files form forntend
+        self.compute_getXmlOrder()       # find xml traversal order
+        self.compute_checkFiles()        # check downloaded files md5 signature
+        self.compute_getAttrs()          # get attrs 
+        self.compute_updateAttrs()       # update attrs
+        self.printAttrs(True)            # print new attrs as a dictionary
+        self.printAttrs(False)           # print new attrs as a text file (info)
+        self.compute_createPosts()        # create post scripts 
+
+
+    def run(self):
+        """ main """
+        self.startLog()
+        self.setEC2()
+
+        if self.fe:
+            self.runFrontend()
+            print "(FIXME) self.orderFrontend:", self.orderFrontend
+        else:
+            self.runCompute()
+
+        print "(FIXME) self.orderCompute:", self.orderCompute
+
+        self.endLog()
+
+if __name__ == "__main__":
+        app=App(sys.argv)
+        app.run()

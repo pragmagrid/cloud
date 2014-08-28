@@ -1,0 +1,524 @@
+#!/bin/bash
+
+CheckIfEC2 () {
+    # find if we are on the cloud
+    x=$(curl -sf http://169.254.169.254/latest/)
+    if [ "$x" == "" ] ; then
+       EC2=""
+    else
+       EC2="EC2"
+    fi
+}
+
+SetDefaults () {
+    LOG=/tmp/VMchange.log
+    SAVE=/root/prev-config
+    if [ ! -d $SAVE ] ; then
+        mkdir $SAVE
+    fi
+}
+
+StartLog () {
+    touch $LOG
+    if [ -f $LOG ] ; then
+        rm -rf $LOG
+    fi
+    echo "Start: " `date` >> $LOG
+}
+
+EndLog () {
+    echo "End: " `date` >> $LOG
+}
+
+FindOrigVals () {
+    echo "Running FindOrigVals" >> $LOG 2>&1
+    ORIG_FE_IP0=`cat /var/cluster/frontend`
+    ORIG_FE_NAME=`ls /etc/init.d/sgeexecd.* | awk -F "." '{print $3}'`
+}
+
+FindInterfaceVals () {
+    return
+}
+
+FindInterfaceValsEC2 () {
+    echo "Running FindInterface $1" >> $LOG 2>&1
+
+    # find mac and CIDR
+    hwaddr="`ifconfig $1 | grep HWaddr | awk '{print tolower($5)}'`"
+    ip=`curl -sf http://169.254.169.254/latest/meta-data/local-ipv4/`
+    cidr='24'
+    broadcast=`echo $ip | awk -F "." '{printf("%d.%d.%d.255", $1,$2,$3)}'`
+    netmask='255.255.255.0'
+
+    # find subnet
+    SaveIFS=$IFS
+    IFS=.
+    typeset -a IPArray=($ip)
+    typeset -a NetmaskArray=($netmask)
+    IFS=$SaveIFS
+
+    typeset -i ipoct1=${IPArray[0]}
+    typeset -i ipoct2=${IPArray[1]}
+    typeset -i ipoct3=${IPArray[2]}
+    typeset -i ipoct4=${IPArray[3]}
+
+    typeset -i nmoct1=${NetmaskArray[0]}
+    typeset -i nmoct2=${NetmaskArray[1]}
+    typeset -i nmoct3=${NetmaskArray[2]}
+    typeset -i nmoct4=${NetmaskArray[3]}
+
+    subnet="$((ipoct1 & nmoct1)).$((ipoct2 & nmoct2)).$((ipoct3 & nmoct3)).$((ipoct4 & nmoct4))"
+    all=($hwaddr $ip $cidr $broadcast $netmask $subnet)
+}
+
+
+FindNewVals () {
+    (cd /root/utils; /usr/bin/wget --no-check-certificate  http://10.1.0.5/frontend-info)
+    if [ ! -f /root/utils/frontend-info ] ; then
+        echo "Error: can't access frontend info file"
+        exit 1
+    fi
+
+    . /root/utils/frontend-info
+
+    FindInterfaceVals$EC2 eth0
+    IP_0=${all[1]}
+    SUBNET=${all[5]}
+    # 6 - have 5 reserved ip's
+    rank=`echo $IP_0 | awk -F"." '{print $4-6}'`
+    HOSTNAME=compute-0-$rank
+    GATEWAY=$FE_IP0
+
+
+}
+
+FindValues () {
+    FindOrigVals
+    FindNewVals
+}
+
+do-411-client () {
+# ./nodes/411-client.xml
+cp -p /etc/411.conf $SAVE
+echo "Running 411-client.xml commands" >> $LOG
+chown root:root /etc/411.conf
+chown root:root /etc/RCS/411.conf,v
+chmod 0600 /etc/411.conf
+cat > /etc/411.conf << EOF
+<!-- 410 Configuration -->
+<config>
+<group>Compute</group>
+<appliance>compute</appliance>
+<master url="http://$FE_IP0:372/411.d/"/>
+<os>linux</os>
+</config>
+
+EOF
+
+touch /etc/rc.d/rocksconfig.d/post-02-411get
+chmod 0700 /etc/rc.d/rocksconfig.d/post-02-411get
+cat > /etc/rc.d/rocksconfig.d/post-02-411get << EOF
+#!/bin/bash
+
+# Tell frontend to send you the 411 shared key
+/opt/rocks/bin/get-411-key $FE_IP0
+
+# Wait 10 seconds for shared key to get populated
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+        [ ! -f /etc/411-security/shared.key ] && sleep 10
+done
+
+# If shared key got transferred, do a 411get and pull information
+# from frontend
+
+[ -f /etc/411-security/shared.key ] && /opt/rocks/bin/411get --all
+
+if [ -f /etc/rc3.d/S*autofs -o -f /etc/rc5.d/S*autofs ] ; then
+        /sbin/service autofs restart
+fi
+
+rm -rf /etc/rc.d/rocksconfig.d/post-02-411get
+EOF
+
+echo "updated" | /opt/rocks/bin/ci /etc/rc.d/rocksconfig.d/post-02-411get
+/opt/rocks/bin/co -f -l /etc/rc.d/rocksconfig.d/post-02-411get
+chmod 0700 /etc/rc.d/rocksconfig.d/post-02-411get
+/etc/rc.d/rocksconfig.d/post-02-411get
+}
+
+do-client () {
+#./nodes/client.xml
+echo "Running client.xml commands" >> $LOG
+cp -p /var/cluster/frontend  $SAVE
+
+cat > /var/cluster/frontend << EOF
+$FE_IP0 
+EOF
+
+sed -i 's/DatabaseHost =/#DatabaseHost =/' /opt/rocks/lib/python2.4/site-packages/rocks/__init__.py
+cat >> /opt/rocks/lib/python2.4/site-packages/rocks/__init__.py << EOF
+DatabaseHost = "$FE_IP0"
+EOF
+}
+
+do-sge-base () {
+# ./nodes/sge-base.xml
+echo "Running sge-base.xml commands" >> $LOG
+sed -i 's/SGE_CLUSTER_NAME=/#SGE_CLUSTER_NAME=/' /opt/gridengine/util/install_modules/sge_configuration.conf 
+cat >> /opt/gridengine/util/install_modules/sge_configuration.conf << EOF
+SGE_CLUSTER_NAME="$FE_IP0"
+EOF
+}
+
+do-networking-client () {
+#./nodes/networking-client.xml
+echo "Running networking-client.xml commands" >> $LOG
+cp -p  /etc/sysconfig/network $SAVE
+cat > /etc/sysconfig/network << EOF
+NETWORKING=yes
+HOSTNAME=$HOSTNAME
+GATEWAY=$GATEWAY
+EOF
+
+}
+
+do-yum () {
+# ./nodes/yum.xml
+echo "Running yum.xml commands" >> $LOG
+cp -p /etc/yum.conf $SAVE
+oldip=`cat /etc/yum.conf | grep  baseurl | awk -F "/" '{print $3}'`
+sed -i "s/$oldip/$FE_IP0/" /etc/yum.conf
+
+}
+
+do-routes-client () {
+#./nodes/routes-client.xml
+echo "Running route-client.xml commands" >> $LOG
+cp -p /etc/sysconfig/static-routes $SAVE
+cat > /etc/sysconfig/static-routes << EOF
+any host $FE_IP1  gw $GATEWAY
+any net 224.0.0.0 netmask 255.255.255.0 dev eth0
+any host 255.255.255.255 dev eth0
+EOF
+
+}
+
+
+do-condor () {
+# ./nodes/condor.xml
+echo "Running condor.xml commands" >> $LOG
+cp -p /opt/condor/etc/condor_config.local $SAVE
+cat > /opt/condor/etc/condor_config.local << EOF
+ALLOW_WRITE = \$(HOSTALLOW_WRITE)
+AMAZON_GAHP = \$(SBIN)/amazon_gahp
+AMAZON_GAHP_LOG = /tmp/AmazonGahpLog.\$(USERNAME)
+COLLECTOR_NAME = Collector at $FE_IP0
+COLLECTOR_SOCKET_CACHE_SIZE = 1000
+CONDOR_ADMIN = condor@$FE_IP0
+CONDOR_DEVELOPERS = NONE
+CONDOR_DEVELOPERS_COLLECTOR = NONE
+CONDOR_HOST = $FE_IP0
+CONDOR_IDS = 407.407
+CONDOR_SSHD = /usr/sbin/sshd
+CONDOR_SSH_KEYGEN = /usr/bin/ssh-keygen
+CONTINUE = True
+DAEMON_LIST = MASTER, STARTD
+EMAIL_DOMAIN = \$(FULL_HOSTNAME)
+FILESYSTEM_DOMAIN = $DNS_DOMAIN_0
+HIGHPORT = 50000
+HOSTALLOW_WRITE = $FE_IP0, *.local, `echo $SUBNET | sed "s/\.*.$/\.\*/"`
+JAVA = /usr/java/latest/bin/java
+KILL = False
+LOCAL_DIR = /var/opt/condor
+LOCK = /tmp/condor-lock.\$(HOSTNAME)
+LOWPORT = 40000
+MAIL = /bin/mail
+NEGOTIATOR_INTERVAL = 120
+NETWORK_INTERFACE = $IP_0
+PREEMPT = False
+RANK = None
+RELEASE_DIR = /opt/condor
+SOAP_SSL_CA_FILE = /etc/pki/tls/cert.pem
+START = True
+STARTD_EXPRS = \$(STARTD_EXPRS)
+SUSPEND = False
+UID_DOMAIN = local
+UPDATE_COLLECTOR_WITH_TCP = True
+WANT_SUSPEND = False
+WANT_VACATE = False
+EOF
+
+# Now calculate the JAVA_EXTRA_ARGUMENTS
+export localmem=`/usr/bin/free -m | awk '/^Mem:/{print $2}'`
+if [ $localmem -gt 1906 ] ; then
+        localmem=1906
+fi
+echo "JAVA_EXTRA_ARGUMENTS = -Xmx${localmem}m" >> /opt/condor/etc/condor_config.local
+}
+
+
+do-ganglia-client () {
+#./nodes/ganglia-client.xml
+echo "Running ganglia-client.xml commands" >> $LOG
+cp -p /etc/ganglia/gmond.conf $SAVE
+sed -i "s/$ORIG_FE_IP0/$FE_IP0/" /etc/ganglia/gmond.conf 
+}
+
+do-hpc-client () {
+#./nodes/hpc-client.xml
+echo "Running hpc-client.xml commands" >> $LOG
+cp -p /etc/ssh/sshd_config $SAVE
+cpus=`grep 'processor' /proc/cpuinfo | wc -l`
+maxstartups=$(echo "$cpus * 2" | bc)
+
+if [ $maxstartups -lt 10 ]
+then
+        maxstartups=10
+fi
+
+export maxstartups
+sed -i 's/MaxStartups/#MaxStartups/'  /etc/ssh/sshd_config
+echo "MaxStartups $maxstartups" >> /etc/ssh/sshd_config
+
+}
+
+do-mail-client () {
+#./nodes/mail-client.xml
+echo "Running mail-client.xml commands" >> $LOG
+cp -p /etc/postfix/main.cf $SAVE
+sed -i "s/$ORIG_FE_IP0/$FE_IP0/" /etc/postfix/main.cf
+
+service postfix restart
+
+}
+
+do-ntp-client () {
+#./nodes/ntp-client.xml
+echo "Running ntp-client.xml commands" >> $LOG
+cp -p /etc/ntp.conf $SAVE
+cat > /etc/ntp.conf << EOF
+server $FE_IP0
+driftfile /var/lib/ntp/drift
+EOF
+
+/bin/mkdir -p /etc/ntp
+
+cp -p /etc/ntp/step-tickers $SAVE
+cat > /etc/ntp/step-tickers << EOF
+$FE_IP0
+EOF
+
+/usr/sbin/ntpdate $FE_IP0
+
+
+}
+
+do-resolve () {
+#./nodes/resolv.xml
+echo "Running resolv.xml commands" >> $LOG
+cp -p  /etc/resolv.conf $SAVE
+cat > /etc/resolv.conf << EOF
+search local ucsd.edu compute-1.amazonaws.com ec2private ec2tunnel
+nameserver $FE_IP0
+EOF
+
+cp -p /etc/hosts $SAVE
+cat > /etc/hosts << EOF
+127.0.0.1       localhost.localdomain localhost
+$IP_0		$HOSTNAME.$DNS_DOMAIN_0 $HOSTNAME
+$FE_IP0		$FE_NAME_0.$DNS_DOMAIN_0 $FE_IP0
+$FE_IP1		$FE_NAME_1.$DNS_DOMAIN_1 
+EOF
+
+
+}
+
+do-sge-client () {
+#./nodes/sge-client.xml
+echo "Running sge-client.xml commands" >> $LOG
+
+mkdir -p /opt/gridengine/default/spool
+mkdir -p /opt/gridengine/default/common
+
+if [ ! -f /opt/gridengine/default/common/RCS/act_qmaster,v ]; then 
+        if [ ! -f /opt/gridengine/default/common/act_qmaster ]; then 
+                touch /opt/gridengine/default/common/act_qmaster;
+        fi
+        if [ ! -d /opt/gridengine/default/common/RCS ]; then 
+                mkdir -m 700 /opt/gridengine/default/common/RCS
+                chown 0:0 /opt/gridengine/default/common/RCS
+        fi;
+        echo "original" | /opt/rocks/bin/ci /opt/gridengine/default/common/act_qmaster;
+        /opt/rocks/bin/co -f -l /opt/gridengine/default/common/act_qmaster;
+fi
+
+chmod 0444 /opt/gridengine/default/common/act_qmaster
+cat > /opt/gridengine/default/common/act_qmaster << EOF
+$FE_IP0
+
+EOF
+
+if [ ! -f /opt/gridengine/default/common/RCS/configuration,v ]; then
+        if [ ! -f /opt/gridengine/default/common/configuration ]; then
+                touch /opt/gridengine/default/common/configuration;
+        fi
+        if [ ! -d /opt/gridengine/default/common/RCS ]; then
+                mkdir -m 700 /opt/gridengine/default/common/RCS
+                chown 0:0 /opt/gridengine/default/common/RCS
+        fi;
+        echo "original" | /opt/rocks/bin/ci /opt/gridengine/default/common/configuration;
+        /opt/rocks/bin/co -f -l /opt/gridengine/default/common/configuration;
+fi
+chmod 0444 /opt/gridengine/default/common/configuration
+cat /opt/gridengine/default.$ORIG_FE_NAME/common/configuration > /opt/gridengine/default/common/configuration 
+
+if [ ! -f /opt/gridengine/default/common/RCS/settings.sh,v ]; then
+        if [ ! -f /opt/gridengine/default/common/settings.sh ]; then
+                touch /opt/gridengine/default/common/settings.sh;
+        fi
+        if [ ! -d /opt/gridengine/default/common/RCS ]; then
+                mkdir -m 700 /opt/gridengine/default/common/RCS
+                chown 0:0 /opt/gridengine/default/common/RCS
+        fi;
+        echo "original" | /opt/rocks/bin/ci /opt/gridengine/default/common/settings.sh;
+        /opt/rocks/bin/co -f -l /opt/gridengine/default/common/settings.sh;
+fi
+chmod 0444 /opt/gridengine/default/common/settings.sh
+cat /opt/gridengine/default.$ORIG_FE_NAME/common/settings.sh > /opt/gridengine/default/common/settings.sh
+sed -i "s/^SGE_CLUSTER_NAME=.*$/SGE_CLUSTER_NAME=$FE_IP0; export SGE_CLUSTER_NAME/" /opt/gridengine/default/common/settings.sh
+
+if [ ! -f /opt/gridengine/default/common/RCS/settings.csh,v ]; then
+        if [ ! -f /opt/gridengine/default/common/settings.csh ]; then
+                touch /opt/gridengine/default/common/settings.csh;
+        fi
+        if [ ! -d /opt/gridengine/default/common/RCS ]; then
+                mkdir -m 700 /opt/gridengine/default/common/RCS
+                chown 0:0 /opt/gridengine/default/common/RCS
+        fi;
+        echo "original" | /opt/rocks/bin/ci /opt/gridengine/default/common/settings.csh;
+        /opt/rocks/bin/co -f -l /opt/gridengine/default/common/settings.csh;
+fi
+chmod 0444 /opt/gridengine/default/common/settings.csh
+cat  /opt/gridengine/default.$ORIG_FE_NAME/common/settings.csh > /opt/gridengine/default/common/settings.csh
+sed -i "s/^setenv SGE_CLUSTER_NAME.*$/setenv SGE_CLUSTER_NAME $FE_IP0/" /opt/gridengine/default/common/settings.csh
+
+if [ ! -f /opt/gridengine/default/common/RCS/bootstrap,v ]; then
+        if [ ! -f /opt/gridengine/default/common/bootstrap ]; then
+                touch /opt/gridengine/default/common/bootstrap;
+        fi
+        if [ ! -d /opt/gridengine/default/common/RCS ]; then
+                mkdir -m 700 /opt/gridengine/default/common/RCS
+                chown 0:0 /opt/gridengine/default/common/RCS
+        fi;
+        echo "original" | /opt/rocks/bin/ci /opt/gridengine/default/common/bootstrap;
+        /opt/rocks/bin/co -f -l /opt/gridengine/default/common/bootstrap;
+fi
+chmod 0444 /opt/gridengine/default/common/bootstrap
+cat /opt/gridengine/default.$ORIG_FE_NAME/common/bootstrap > /opt/gridengine/default/common/bootstrap
+
+if [ ! -f /opt/gridengine/default/common/RCS/cluster_name,v ]; then
+        if [ ! -f /opt/gridengine/default/common/cluster_name ]; then
+                touch /opt/gridengine/default/common/cluster_name;
+        fi
+        if [ ! -d /opt/gridengine/default/common/RCS ]; then
+                mkdir -m 700 /opt/gridengine/default/common/RCS
+                chown 0:0 /opt/gridengine/default/common/RCS
+        fi;
+        echo "original" | /opt/rocks/bin/ci /opt/gridengine/default/common/cluster_name;
+        /opt/rocks/bin/co -f -l /opt/gridengine/default/common/cluster_name;
+fi
+chmod 0444 /opt/gridengine/default/common/cluster_name
+cat > /opt/gridengine/default/common/cluster_name << EOF
+$FE_IP0
+
+EOF
+
+cp -p /opt/gridengine/default.$ORIG_FE_NAME/common/sgeexecd /opt/gridengine/default/common/sgeexecd 
+sed -i "s/^# Provides:.*$/# Provides: sgeexecd.$FE_IP0/" /opt/gridengine/default/common/sgeexecd
+
+cp -p /opt/gridengine/util/install_modules/sge_host_config.conf $SAVE
+sed -i "s/^SGE_CLUSTER_NAME=.*$/SGE_CLUSTER_NAME=\"$FE_IP0\"/" /opt/gridengine/util/install_modules/sge_host_config.conf
+
+/opt/rocks/bin/co -f -l /etc/rc.d/rocksconfig.d/post-91-sge
+chmod 0755 /etc/rc.d/rocksconfig.d/post-91-sge
+
+}
+
+do-pxeboot () {
+# ./nodes/pxeboot.xml
+echo "Running pxeboot.xml commands" >> $LOG
+cp -p /boot/kickstart/cluster-kickstart-pxe $SAVE
+oldip=`cat /boot/kickstart/cluster-kickstart-pxe | grep  https | awk -F "/" '{print $3}'`
+sed -i "s/$oldip/$FE_IP0/" /boot/kickstart/cluster-kickstart-pxe
+
+# no need - can't kickstart in vpc now
+#/usr/bin/wget --no-check-certificate -O /dev/null \
+#        https://$FE_IP0/install/sbin/public/setPxeboot.cgi
+
+}
+
+PrepCondor () {
+    echo "Running PrepCondor" >> $LOG
+    service rocks-condor stop
+    ips=`ps -ef | grep condor | grep -v grep | awk '{print $2}'`
+    for i in $ips ;
+    do
+        kill -9  $i
+    done
+}
+
+PrepSGE () {
+    echo "Running PrepSGE" >> $LOG
+    if [ -f /etc/init.d/sgeexecd.$ORIG_FE_NAME ]; then
+        ips=`ps -ef | grep sge_execd | grep -v grep | awk '{print $2}'`
+        for i in $ips ;
+        do
+            kill -9  $i
+        done
+
+        mv /etc/init.d/sgeexecd.$ORIG_FE_NAME $SAVE 
+    fi
+
+    sed -i "s/$ORIG_FE_NAME/$NEW_NAME/" /opt/gridengine/util/install_modules/sge_configuration.conf
+    mv /opt/gridengine/default /opt/gridengine/default.$ORIG_FE_NAME
+}
+
+
+
+RunPosts () {
+    do-411-client
+    do-client
+    do-sge-base
+    do-networking-client
+    do-yum
+
+    # FIXME: may not need
+    do-routes-client  
+
+    do-condor
+    do-ganglia-client
+    do-hpc-client
+    do-mail-client
+    do-ntp-client
+    do-resolve   
+    service network restart
+    do-sge-client
+    do-pxeboot
+
+    /etc/rc.d/rocksconfig.d/post-91-sge
+    sgeexecd=`(cd /etc/init.d; ls sgeexecd.* )`
+    chkconfig --add $sgeexecd 
+    chkconfig $sgeexecd on
+
+    service rocks-condor start
+}
+
+############## MAIN #############
+CheckIfEC2
+SetDefaults
+StartLog
+FindValues
+PrepCondor
+PrepSGE
+RunPosts
+EndLog
