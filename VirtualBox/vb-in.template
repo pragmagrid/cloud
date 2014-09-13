@@ -1,8 +1,8 @@
 <vbc version="0.1">
-    <vm name="fe611" private="local-fe611">
-	    <iso os="Linux_64" path="/Users/nadya/Desktop/vbox/ISO/linux-6.1.1.iso"/>
-	    <shared name="data1" path="/Users/Shared/data1"/>
-	    <shared name="data2" path="/tmp/data2"/>
+    <vm name="x" private="local-x">
+	    <iso os="Linux_64" path="/path/to/boot-6.1.1.iso"/>
+	    <shared name="data1" path="/path/to/shared/data1"/>
+	    <shared name="data2" path="/path/to/other"/>
 	    <enable cpuhotplug="on" />
     </vm>
     <frontend cpus="2">
