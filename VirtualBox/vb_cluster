@@ -21,11 +21,14 @@ class VBwrapper:
 
 	def parseArgs(self):
 		"""parse command line arguments """
-		self.errors = { "errType":"need to provide type (frontend or compute)",
-						"errNoConfig":"need to provide xml configuration file.",
+		self.errors = { "errType":"Need to provide type. Valid types: frontend or compute",
+						"errNoConfig":"Need to provide xml configuration file.",
 						"errConfig":"Configuration file %s is not found"}
-		usage = "Usage: %prog --type=[frontend|compute] configFile"
+		usage = "Usage: %prog [-h] [-d] --type=[frontend|compute] configFile"
 		self.parser = OptionParser(usage, version=self.version)
+		self.parser.add_option("-d", "--debug", 
+								dest="debug", action="store_true",
+								default=False, help="Prints values  parsed from input file and exits")
 		self.parser.add_option("--type", dest="type", default=False, help="VM type is frontend or compute")
 
 		(options, args) = self.parser.parse_args(self.args)
@@ -39,6 +42,7 @@ class VBwrapper:
 		else:
 			self.parser.error(self.errors["errNoConfig"])
 
+		self.debug = options.debug
 
 	def checkCommand(self):
 		"""verify VBox command exists"""
@@ -89,6 +93,9 @@ class VBwrapper:
 			# get compute info
 			self.parseComputeTag(xmlroot)
 
+		if self.debug:
+			pprint(self.__dict__)
+			sys.exit()
 
 	def parseVmTag(self, xmlroot):
 		"""parse <vm> tag info"""
@@ -96,7 +103,7 @@ class VBwrapper:
 		# VM and network names
 		xmlnode = xmlroot.findall("./vm")[0]
 		self.VM["vm_name"]= xmlnode.attrib["name"]
-		self.VM["vm_network"] = local = xmlnode.attrib["private"]
+		self.VM["vm_network"] = xmlnode.attrib["private"]
 
 		# iso info
 		xmlnode = xmlroot.findall("./vm/iso")[0]
@@ -327,6 +334,7 @@ class VBwrapper:
 
 	def run(self):
 		self.parseConfig()
+
 		if self.type == "frontend":
 			name = self.VM["vm_name"]
 			self.runCommands(name)
