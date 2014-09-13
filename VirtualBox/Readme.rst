@@ -22,19 +22,21 @@ Prerequisites
   from `VirtualBox <https://www.virtualbox.org>`_ web site
 + Download VBox Guest Additions ISO (ex. VBoxGuestAdditions_4.3.10.iso)
 + Download Rocks boot ISO from `Rocks <http://www.rocksclusters.org>`_  web site
-+ Download ``vb_cluster`` and vb-in.template from `this repo <https://github.com/pragmagrid/cloud/tree/master/VirtualBox>`_
++ Download ``vbox_cluster`` and vb-in.template from `this repo <https://github.com/pragmagrid/cloud/tree/master/VirtualBox>`_
 
 Install Frontend
 ========================
 
-#. Create input xml configuration file ``vb-in.xml`` with your desired settings
+#. Create input xml configuration file ``vb-in.xml`` 
 
-   There is vb-in.template file that is provided for building a frontend and 2 compute nodes.
+   Use downloaded `vb-in.template` file  to create input `vb-in.xml` with your
+   desired settings. The tempate file  provids for building a frontend and 2 compute nodes.
+   Most settings  have reasonable default values. 
    See details in the section `Configuration File`_ below.
 
 #. Run script to create VM settings in VirtualBox::
 
-       $ ./vb_cluster --type=frontend vb-in.xml 
+       $ ./vbox_cluster --type=frontend vb-in.xml 
       
 #. Start VM either from a VBox Manager GUI console or using a command::
 
@@ -60,7 +62,7 @@ for compute nodes configuration.
    
 #. Run script to create compute node VMs settings in VirtualBox::
 
-         $ ./vb_cluster --type=compute vb-in.xml 
+         $ ./vbox_cluster --type=compute vb-in.xml 
       
 #. On the frontend VM run: ::
 
@@ -176,7 +178,7 @@ Configuration file
 ====================
 
 This file is a set of parameters used  to describe frontend and compute nodes
-VM images of the cluster. The file is parsed by the ``vb_cluster`` script and the values
+VM images of the cluster. The file is parsed by the ``vbox_cluster`` script and the values
 are used to create all vboxmanage commands needed to define and register VMs
 with the VirtualBox. Most values are working defaults that don't need changes.::
 
@@ -188,7 +190,7 @@ with the VirtualBox. Most values are working defaults that don't need changes.::
          <iso os="Linux_64" path="/path/to/boot-6.1.1.iso"/>  
                   type of VM's os and Rocks boot ISO path  
          <shared name="data1" path="/some/path1/data1"/>  
-                  host directory from path  will be automounted on guest VM as /mediasf_data1 
+                  host directory from path  will be automounted on guest VM as /media/sf_data1 
          <shared name="data2" path="/some/path2/data2"/>  
                   host directory  from path will be automounted on guest VM as /media/sf_data2  
          <enable cpuhotplug="on" />  
