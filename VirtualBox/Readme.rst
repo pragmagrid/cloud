@@ -199,7 +199,7 @@ with the VirtualBox. Most values are working defaults that don't need changes.::
         
       <frontend cpus="2">  
                number of cpus 
-         <memory base="2000" vram="32" />  
+         <memory base="4000" vram="32" />  
                allocate base and video memory to VM  
          <boot order="dvd disk none none" />  
                boot order   
