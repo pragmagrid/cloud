@@ -20,7 +20,8 @@ Prerequisites
 
 + Download and install ``VirtualBox`` and ``VirtualBox Oracle VM VirtualBox Extension Pack`` 
   from `VirtualBox <https://www.virtualbox.org>`_ web site
-+ Download VBox Guest Additions ISO (ex. VBoxGuestAdditions_4.3.10.iso)
++ Download VBox Guest Additions ISO (ex. VBoxGuestAdditions_4.3.10.iso) from
+  `download 4.3.10 http://download.virtualbox.org/virtualbox/4.3.10/`_
 + Download Rocks boot ISO from `Rocks <http://www.rocksclusters.org>`_  web site
 + Download ``vbox_cluster`` and vb-in.template from `this repo <https://github.com/pragmagrid/cloud/tree/master/VirtualBox>`_
 
