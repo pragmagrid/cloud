@@ -6,7 +6,7 @@
 	    <enable cpuhotplug="on" />
     </vm>
     <frontend cpus="2">
-        <memory base="2000" vram="32" />
+        <memory base="4000" vram="32" />
 	    <boot order="dvd disk none none" />
 	    <private nic="intnet" nictype="82540EM" nicname="default"/>
 	    <public nic="nat" nictype="82540EM" />
