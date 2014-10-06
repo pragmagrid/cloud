@@ -1,5 +1,6 @@
 
-============================
+.. highlight:: rest
+
 Rocks Cluster in VirtualBox
 ============================
   
@@ -7,7 +8,7 @@ Rocks Cluster in VirtualBox
   :depth: 3
 
 Introduction
-================
+-----------------
 
 This page explains how to install Rocks cluster in VirtualBox.
 
@@ -16,7 +17,7 @@ This page explains how to install Rocks cluster in VirtualBox.
 :Host OS:     MacOS X 10.9.3
 
 Prerequisites
-=====================
+----------------
 
 + Download and install ``VirtualBox`` and ``VirtualBox Oracle VM VirtualBox Extension Pack`` 
   from `VirtualBox <https://www.virtualbox.org>`_ web site
@@ -26,7 +27,7 @@ Prerequisites
 + Download ``vbox_cluster`` and vb-in.template from `this repo <https://github.com/pragmagrid/cloud/tree/master/VirtualBox>`_
 
 Install Frontend
-========================
+--------------------
 
 #. Create input xml configuration file ``vb-in.xml`` 
 
@@ -56,7 +57,7 @@ Install Frontend
          FQDN = fe.public (or any other name)
  
 Install compute nodes
-=============================
+--------------------------
 
 Use the same ``vb-in.xml`` file that was created for installing frontend, it has a separate section
 for compute nodes configuration.
@@ -78,7 +79,7 @@ for compute nodes configuration.
    
    
 Install Guest Additions
-=================================
+--------------------------
 
 Guest Additiosn allow to mount directories from the host computer to the guest VM and transfer files
 between the two. If you don't need mounting from the host skip this section.
@@ -176,7 +177,7 @@ between the two. If you don't need mounting from the host skip this section.
 .. _configfile:
 
 Configuration file
-====================
+--------------------------
 
 This file is a set of parameters used  to describe frontend and compute nodes
 VM images of the cluster. The file is parsed by the ``vbox_cluster`` script and the values
@@ -236,7 +237,7 @@ with the VirtualBox. Most values are working defaults that don't need changes.::
      </vbc>  
 
 Starting VBox after TimeMachine restore
-=========================================
+-----------------------------------------
 
 If your VirtualBox was restored among other applications from TimeMachine backup
 the needed daemons and devices (/dev/vboxdrv /dev/vboxdrvu /dev/vboxnetctl) may no 
@@ -256,3 +257,9 @@ if /dev/vbox* get lost.
    + From  ``Preferences...`` open ``Network`` tab  
    + Choose ``Host-only Networks`` tab and click on add icon (plus sign) to add the network 
    + Confirm  with ``Ok`` button  
+
+
+Setting a NAT network
+------------------------
+
+TODO
