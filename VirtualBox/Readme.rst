@@ -22,27 +22,31 @@ Prerequisites
 + Download and install ``VirtualBox`` and ``VirtualBox Oracle VM VirtualBox Extension Pack`` 
   from `VirtualBox <https://www.virtualbox.org>`_ web site
 + Download VBox Guest Additions ISO (ex. VBoxGuestAdditions_4.3.10.iso) from
-  `download 4.3.10 http://download.virtualbox.org/virtualbox/4.3.10/`_
-+ Download Rocks boot ISO from `Rocks <http://www.rocksclusters.org>`_  web site
-+ Download ``vbox_cluster`` and vb-in.template from `this repo <https://github.com/pragmagrid/cloud/tree/master/VirtualBox>`_
+  `download 4.3.10 <http://download.virtualbox.org/virtualbox/4.3.10/>`_
++ Download Rocks boot ISO (kernel/boot roll) from `Rocks <http://www.rocksclusters.org/wordpress/?page_id=477>`_  web site
++ Download ``vbox_cluster`` and ``vb-in.template`` 
+  from `this repo <https://github.com/pragmagrid/cloud/tree/master/VirtualBox>`_
+
+Install Cluster
+------------------
+
+Create input xml configuration file that will be used by ``vbox_cluster`` 
+command to create all virtual machines.
+
+Use downloaded `vb-in.template` file  to create input `cluster.xml` with your
+desired settings. The tempate file  provids for building a frontend and 2 compute nodes.
+Most settings  have reasonable default values. 
+See details in the section `Configuration File`_ below.
 
 Install Frontend
---------------------
-
-#. Create input xml configuration file ``vb-in.xml`` 
-
-   Use downloaded `vb-in.template` file  to create input `vb-in.xml` with your
-   desired settings. The tempate file  provids for building a frontend and 2 compute nodes.
-   Most settings  have reasonable default values. 
-   See details in the section `Configuration File`_ below.
-
+~~~~~~~~~~~~~~~~~~~~
 #. Run script to create VM settings in VirtualBox::
 
-       $ ./vbox_cluster --type=frontend vb-in.xml 
+       $ ./vbox_cluster --type=frontend cluster.xml 
       
 #. Start VM either from a VBox Manager GUI console or using a command::
 
-       $ vboxmanager startvm <VMName>
+       $ vboxmanage startvm <VMName>
         
    <VMName> is the name of a VM that was specified in the configuration file
    
@@ -57,14 +61,14 @@ Install Frontend
          FQDN = fe.public (or any other name)
  
 Install compute nodes
---------------------------
+~~~~~~~~~~~~~~~~~~~~~~~
 
-Use the same ``vb-in.xml`` file that was created for installing frontend, it has a separate section
+Use the same ``cluster.xml`` file that was created for installing frontend, it has a separate section
 for compute nodes configuration.
    
 #. Run script to create compute node VMs settings in VirtualBox::
 
-         $ ./vbox_cluster --type=compute vb-in.xml 
+         $ ./vbox_cluster --type=compute cluster.xml 
       
 #. On the frontend VM run: ::
 
@@ -72,14 +76,14 @@ for compute nodes configuration.
    
    Start first compute node VM either from VBox Manager GUI or via a command line: ::  
 
-         $ vboxmanager startvm <VMName>
+         $ vboxmanage startvm <VMName>
 
    When the compute node is "discovered" by ``insert-ethers``, start the next compute node VM.
    Quit insert-ethers once all compute nodes that need to be installed are "discovered".
    
    
 Install Guest Additions
---------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Guest Additiosn allow to mount directories from the host computer to the guest VM and transfer files
 between the two. If you don't need mounting from the host skip this section.
