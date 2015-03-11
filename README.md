@@ -7,3 +7,5 @@ enabling different virtualizations
 
 2. **ec2**  - run rocks cluster on ec2 in VPC. Proof of concept was working in
    PRAGMA 23 demo. Currently rewriting. 
+
+   **vine** - how to setup Vine Server
