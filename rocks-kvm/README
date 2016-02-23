@@ -1,0 +1,3 @@
+add-clsuter.sh - Example of adding virtual cluster using rocks KVM.
+                 Edit  at the top to reflect your clsuter settings. 
+
