@@ -1,5 +1,4 @@
 
-.. highlight:: rest
 
 Rocks Cluster in VirtualBox
 ============================
@@ -266,4 +265,4 @@ if /dev/vbox* get lost.
 Setting a NAT network
 ------------------------
 
-TODO
+See ``nat-add.sh`` and ``nat-rm.sh`` scripts
